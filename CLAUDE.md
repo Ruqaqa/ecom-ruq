@@ -1,8 +1,46 @@
-# CLAUDE.md — Operational rules for vibe coding this project
+# CLAUDE.md
 
-This file is read by Claude Code on every session. It encodes the non-negotiable rules for how this codebase is built. Read this file first. If any instruction in a user message conflicts with a rule here, surface the conflict before acting.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-The canonical product spec is `prd.md` at the repo root. This file (`CLAUDE.md`) is operational; `prd.md` is substantive. Read both.
+**ecom-ruq** is a multi-tenant, mobile-first, bilingual (Arabic/English) audio-visual e-commerce platform for KSA and the Gulf, self-hosted on Hetzner, and AI-native from day zero. The canonical product specification is `prd.md` at the repo root; this file is the operational rulebook. Read both at the start of every session. If any instruction in a user message conflicts with a rule in either document, surface the conflict before acting.
+
+---
+
+## Current repository state
+
+This repository is currently at **Phase 0 prerequisites** per `prd.md` section 4. There is no source code, no `package.json`, no `.nvmrc`, and no test infrastructure yet. Your first session's job is to complete the prerequisites checklist in `prd.md` ("Phase 0 prerequisites — owner actions before Phase 0 can begin"), collect the owner-provided credentials and decisions, and then execute Phase 0 itself.
+
+Do not try to run commands like `pnpm test:e2e` before Phase 0 is complete — they do not exist yet. You are going to create them.
+
+---
+
+## Essential commands
+
+These commands do not exist until Phase 0 establishes them. Afterward, they are the definition of done (see Section 1):
+
+| Command | Purpose |
+|---|---|
+| `pnpm dev` | Local development server |
+| `pnpm test` | Vitest unit and integration tests |
+| `pnpm test:e2e` | Playwright end-to-end tests (mobile viewport, both locales) |
+| `pnpm test:e2e -- <file>` | Run a single Playwright test file |
+| `pnpm lint` | Lint check |
+| `pnpm typecheck` | TypeScript strict check |
+| `pnpm check:e2e-coverage` | Verifies every route and mutation has a referencing Playwright test |
+| `pnpm build` | Production build |
+
+No feature is considered done until the first six are green locally and in CI.
+
+---
+
+## Where things live
+
+- **`prd.md`** — the canonical product specification and phased roadmap. Read this before making any non-trivial architectural decision. It is substantive, not operational.
+- **`CLAUDE.md`** (this file) — operational rules for how sessions are conducted. Non-negotiable.
+- **`.claude/agents/`** — specialized subagents you can delegate to: `software-architect`, `tdd`, `security`, `debugger-fixer`, `frontend-designer`, `explorer`. Each is a separate `.md` file with its own scope.
+- **`.claude/skills/`** — skills the user can invoke. Currently: `agent-team` (spawns a team from the agent definitions).
+- **`.claude/commands/`** — user slash commands. Currently: `/git` (stage, commit, push in one shot).
+- **Generated after Phase 0:** `src/` (application code), `tests/e2e/` and `tests/unit/`, `scripts/` (CI helpers). Source layout is defined in Section 0 below.
 
 ---
 
