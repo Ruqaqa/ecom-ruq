@@ -1,0 +1,731 @@
+# Product Requirements Document — Audio/Visual E-commerce Platform
+
+**Status:** Draft v2
+**Owner:** Bassel
+**Last updated:** 2026-04-14
+
+---
+
+## 1. Introduction & Context
+
+### 1.1 What we are building
+
+A modern, SEO-optimized, **AI-native** e-commerce platform for an audio/visual (AV) products company, built to serve customers primarily in the Kingdom of Saudi Arabia and the wider Gulf region. The platform must support **two storefronts at launch** (the main brand and a sister company), each on its **own custom domain**, with the architecture ready to onboard a third tenant later.
+
+The platform is the **source of truth** for products, inventory, and orders — there is no upstream ERP to sync with. Whatever we build must therefore be reliable enough to run the business, not just serve as a front-end for another system.
+
+"AI-native" is a first-class requirement: the owner must be able to manage the store and ask business questions in natural language from day zero, and the architecture is shaped around a typed service layer that is exposed to the UI, to MCP, and (later) to native mobile clients uniformly.
+
+### 1.2 Target customer & market
+
+- **Primary geography:** Saudi Arabia (KSA), with Gulf expansion in view (UAE first).
+- **Primary language:** Arabic (RTL) and English, with Arabic being the dominant language of KSA customers. URL structure, search, and SEO must be first-class for both.
+- **Devices:** Mobile-dominant. Gulf e-commerce is overwhelmingly mobile, often on mid-range Android. **Mobile-first UX is non-negotiable** — desktop is an afterthought, not the starting point.
+- **Currency:** SAR primary at launch. AED becomes relevant when the UAE market opens.
+- **Payment expectations:** Mada (essential), Apple Pay (essential in Gulf), Visa/Mastercard, and BNPL via Tabby/Tamara (near-essential for mid-to-high ticket AV items).
+
+### 1.3 Business constraints
+
+- **Solo development** with Claude Code as the primary implementation partner ("vibe coding"). This shapes our tech choices: we prefer well-typed, schema-first, conventional setups that an AI agent can reason about confidently. We avoid clever/magical abstractions.
+- **Near-zero ops burden on the owner.** Infrastructure, deployments, monitoring, and routine store operations should be automatable by AI agents and accessible via natural language. The owner does not want to configure things by hand or open dashboards to answer routine questions.
+- **Self-hosted on Hetzner** (Nuremberg/Falkenstein). We accept the latency trade-off (Europe → Gulf is ~100–150ms for origin requests) and mitigate it aggressively with a CDN that has Gulf POPs.
+- **Budget-conscious** but not bootstrapped: we'll pay for SaaS where self-hosting creates disproportionate ops burden (Sentry, Resend, Moyasar, Claude API), and self-host the rest.
+- **Compliance:** KSA's ZATCA e-invoicing (Phase 2 / Fatoora) and PDPL (personal data protection) are non-negotiable for operating legally in KSA.
+
+### 1.4 Product differentiators
+
+- True multi-tenant (custom domain per brand, isolated catalog, shared codebase)
+- Bilingual Arabic/English with real RTL support, not translated-and-hoped-for-the-best
+- Gulf-native payments and shipping from day one
+- Variant-based catalog (Samsung-style: pick size, color, storage — price and stock vary per variant)
+- SEO-first architecture (SSR/ISR, structured data, hreflang, Arabic-friendly slugs)
+- **AI-native from day zero:** natural-language store management, MCP server for the owner, AI-assisted product entry, AI customer assistant, and autonomous ops agents reducing manual work toward zero.
+- **Client-agnostic API layer:** web today, native mobile app later, with no refactor required.
+
+---
+
+## 2. Tech Stack (Locked)
+
+### 2.0 Runtime & repo conventions
+
+- **Package manager:** **pnpm** (locked). All scripts run via `pnpm <script>`. `npm` and `yarn` are not used.
+- **Node runtime:** **Node 20.x LTS**, pinned in `.nvmrc` and `package.json > engines`.
+- **Repository structure:** **Single Next.js application** (not a monorepo) for Phase 0 through Phase 8. A monorepo split (pnpm workspaces + Turborepo) is deferred to "Phase 50" when a native mobile app is built — at that point the existing Next.js app becomes one workspace and the RN app a second. Until then, one `package.json`, one `tsconfig.json`, one Next.js project at the repo root.
+- **Source layout:** `src/app/` (Next.js routes), `src/server/services/` (typed service layer), `src/server/trpc/` (tRPC routers), `src/server/mcp/` (MCP server), `src/server/db/` (Drizzle schema + migrations), `src/lib/` (shared utilities), `src/i18n/` (locale catalogs), `tests/e2e/` (Playwright), `tests/unit/` (Vitest), `scripts/` (CI helpers including `check-e2e-coverage.ts`).
+- **Git workflow:** Solo → push-to-main with CI gate. No PR-based review. CI must be green before Coolify auto-deploys. Feature branches are optional and used only for work that spans multiple commits without being shippable mid-way.
+- **Environments:** Three environments — `local` (developer machine + Docker Compose), `staging` (Coolify app on Hetzner, seeded with a `staging` tenant), `production` (Coolify app on Hetzner, real tenants on real domains). Staging is where autonomous agents and destructive AI tools are exercised before being pointed at production.
+
+### 2.1 Application
+
+| Layer | Choice | Why |
+|---|---|---|
+| Frontend framework | Next.js 15 (App Router) + TypeScript strict mode | Best-in-class SSR/ISR for SEO, RSC for mobile perf, mature RTL/i18n story |
+| Styling | Tailwind CSS + shadcn/ui | Logical properties for RTL; shadcn is copy-in so tenant theming stays clean |
+| API layer | **tRPC + React Query** | End-to-end TypeScript; consumable by both web and React Native later without a backend refactor |
+| ORM | Drizzle | SQL-first, lightweight, RLS-friendly, great TypeScript inference |
+| Schema validation | Zod | Every service function has a schema — source of truth for types, MCP tools, and API contracts |
+| Database | PostgreSQL 16 (self-hosted on Hetzner) | Mature, supports multi-tenant via RLS, JSONB for translations |
+| Vector search | **pgvector extension on Postgres** | Semantic search over products, policies, docs — no extra service |
+| Auth | Better Auth (with **bearer-token plugin** enabled) | Self-hosted, multi-tenant organizations, cookie auth for web, bearer tokens for future mobile, easy Nafath later |
+| Cache / sessions / queues | Redis (or Dragonfly) + BullMQ | Standard, well-supported |
+| Search | Meilisearch (self-hosted) | Native Arabic tokenization, typo tolerance, fast |
+| Media storage & CDN | BunnyCDN Storage + BunnyCDN pull zone | POPs in Jeddah/Riyadh/Dubai, ~1/10th the cost of Cloudflare/Cloudinary |
+| Payments (KSA) | Moyasar | KSA-licensed, bundles Mada + Visa/MC + Apple Pay + Tabby/Tamara |
+| Payments (intl fallback) | Stripe | For occasional international orders |
+| Email | Resend | Cheap, good DX, SPF/DKIM handled, per-tenant sender domains |
+| SMS / OTP | Unifonic | KSA-based, local number support |
+
+### 2.2 AI & automation
+
+| Layer | Choice | Why |
+|---|---|---|
+| Model provider | **Anthropic Claude API** | First-class dependency; Haiku for cheap routing/classification, Sonnet for reasoning, Opus for complex agent tasks |
+| Server SDK | `@anthropic-ai/sdk` | Streaming, tool use, prompt caching |
+| Client streaming | Vercel AI SDK (`ai`) | Streaming UI for customer chatbot with minimal boilerplate |
+| MCP server | `@modelcontextprotocol/sdk` (TypeScript) | Exposes the platform's service layer to Claude Desktop / Claude Code / agents |
+| Embeddings | **Voyage AI** (`voyage-3` or latest multilingual model) | Better Arabic quality than OpenAI embeddings, keeps us off OpenAI as a vendor. OpenAI `text-embedding-3-small` is a fallback only if Voyage is unavailable for a specific tenant. |
+| Agent orchestration | Plain Claude tool-use loops | No LangChain — too opaque for vibe coding; direct tool loops are clearer |
+
+### 2.3 Platform & ops
+
+| Layer | Choice | Why |
+|---|---|---|
+| PaaS layer | Coolify (on Hetzner) | Self-hosted "Vercel" — git deploys, SSL, multi-domain, managed Postgres/Redis. Critical for solo ops. |
+| Reverse proxy | Traefik (bundled with Coolify) | Auto-SSL, easy multi-domain routing per tenant |
+| Observability | Sentry (SaaS free tier) | Not worth self-hosting for solo |
+| Analytics | Plausible (self-hosted) + GA4 | Privacy-first product analytics; GA4 because marketing will ask |
+| Backups | pg_dump → Hetzner Storage Box | Nightly, 30-day retention, ~€3/month |
+| CI/CD | GitHub Actions → Coolify webhook | Push to main → green CI → auto deploy. No red-to-prod path. |
+
+### 2.4 Testing
+
+| Layer | Choice | Why |
+|---|---|---|
+| E2E browser driver | **Playwright + TypeScript** | Modern standard: parallelism, multi-browser, mobile device emulation, route interception, excellent DX. Claude writes Playwright confidently. |
+| Accessibility in tests | `@axe-core/playwright` | Every E2E test also asserts axe — ties WCAG 2.1 AA NFR into CI |
+| Fake email inbox | **Mailpit** (Docker container) | Password reset, magic link, email verification tests click *real* captured emails |
+| Performance enforcement | **Lighthouse CI** | Enforces mobile perf budget (LCP/INP/CLS/bundle size) on every build. Red → no deploy. |
+| Visual regression | Playwright screenshot diff | Cheap insurance against RTL vs LTR layout bugs |
+| Unit / integration | Vitest | Fast, works with Next.js, good Drizzle support. Complements E2E, does not replace it. |
+
+**Explicitly rejected:**
+- Vercel / Supabase / Clerk (not self-hosted, against user preference)
+- Prisma (heavier than Drizzle, worse RLS story)
+- Elasticsearch / Algolia (overkill / not self-hosted)
+- LangChain / LangGraph (too opaque for vibe coding; direct tool loops are clearer)
+- Microservices (no — start monolith, split only if needed)
+
+---
+
+## 3. Architectural Decisions
+
+### 3.1 Multi-tenancy
+
+- **Model:** Single database, shared schema, `tenant_id` column on every tenant-scoped table, enforced via Postgres RLS policies.
+- **Tenant resolution:** Incoming request → read `Host` header in Next.js middleware → look up tenant by domain → attach `tenantId` to request context → all DB queries scoped automatically.
+- **Why not subdomains:** User chose custom domain per tenant. Better for brand SEO and trust.
+- **Why not schema-per-tenant:** Operationally painful, migrations get weird, overkill for 2–3 tenants.
+
+### 3.2 Internationalization (i18n)
+
+- **Locales at launch:** `en` and `ar`. Architecture must not assume two — adding `ar-AE` or others should be content work, not a refactor.
+- **Routing:** `/{locale}/...` — e.g., `/ar/products/...` and `/en/products/...`. Root `/` redirects based on `Accept-Language` with manual override persisted in a cookie.
+- **Translatable content model:** Every translatable field stored as JSONB with shape `{ en: "...", ar: "..." }` at the column level (e.g., `product.name`, `product.description`). This is simpler than a separate translations table and plays well with Drizzle.
+- **RTL:** `dir` attribute driven by locale. Tailwind logical properties (`ps-4`/`pe-4`, `ms-auto`, `start-0`) throughout. No `left`/`right` in component code.
+- **Arabic typography:** IBM Plex Sans Arabic or Tajawal loaded via `next/font`. Latin typography: Inter via `next/font`.
+- **Arabic slugs:** Allow real Arabic in URLs (Google indexes them correctly). Product slugs are per-locale: `/en/products/sony-a7iv` ↔ `/ar/products/سوني-a7iv`.
+- **hreflang:** Emit `hreflang="ar-SA"` and `hreflang="en-SA"` + `x-default` on every public page.
+- **Locale fallback policy:** Content fields (product name, description, page copy, etc.) are stored per-locale in JSONB. When a field is missing in the requested locale, the public storefront **falls back to the other locale silently** — the shopper always sees something, never a broken placeholder. The admin UI, by contrast, **surfaces missing translations explicitly** with a visible badge so the owner knows what still needs translating. This policy is what makes the phased rollout work: Phase 1 ships in English with i18n routing already live, and an `/ar/` visit sees English product content inside Arabic-localized chrome (nav, footer, buttons) with RTL layout applied. Phase 3 backfills Arabic content without any code changes.
+
+### 3.3 Product variants (Samsung-style)
+
+Catalog model from day one:
+
+- **Product** — the parent concept ("Sony A7 IV Camera")
+- **ProductOption** — an axis of variation, per product ("Color", "Storage", "Kit")
+- **ProductOptionValue** — a value on an axis ("Black", "256GB", "Body only")
+- **ProductVariant** — a specific combination, carrying its own:
+  - SKU
+  - Price (base + sale)
+  - Stock quantity
+  - Weight / dimensions (affects shipping)
+  - Optional variant-specific images
+  - Barcode / EAN
+- **Default variant:** every product has one; if a product has no real variations, it's a product with a single variant. This avoids branching logic everywhere.
+
+Cart and orders reference **variants**, not products.
+
+### 3.4 SEO foundation
+
+Baked in from Phase 0:
+- SSR/ISR for all public pages (no client-only rendering of product/category pages)
+- `generateMetadata` with per-locale titles, descriptions, OG tags
+- JSON-LD: `Product`, `Offer`, `AggregateRating`, `BreadcrumbList`, `Organization`
+- Sitemaps per tenant per locale, referenced in `robots.txt`
+- Canonical URLs (critical when the same product lives under multiple categories)
+- Image sitemaps (AV is visual)
+- 301 redirects on slug changes (admin-managed redirect table)
+
+### 3.5 Compliance foundations
+
+- **PDPL:** cookie consent banner, data export endpoint, data deletion endpoint, audit log for sensitive field access. Raw national IDs (when Nafath lands) stored encrypted at rest.
+- **ZATCA:** invoice schema designed from day one with all required fields (seller/buyer VAT numbers, invoice hash chain, QR code payload). Actual API integration is Phase 6, but data model is Phase 0.
+- **VAT:** 15% KSA, 5% UAE — region-aware tax engine from the start, even if only KSA is used initially.
+
+### 3.6 Tenancy & auth interaction
+
+- Users belong to the platform, not a tenant. A single user can have accounts across multiple tenant storefronts (different carts, different order histories), because the sister-company case means the same customer may shop both brands.
+- Admin users belong to a **tenant** with a role (owner / staff) and permissions.
+- A super-admin role exists for platform operators (us).
+- **Transactional email links must be tenant-aware.** Magic link, password reset, email verification, and order confirmation emails all contain URLs — those URLs must be built against the **tenant's own custom domain**, not a shared domain. The auth layer passes tenant context into the `sendEmail` function so the link host matches where the user actually signed up. Same rule applies to any tenant-scoped email: the link always points to that tenant's domain. Email sender identity (From address, DKIM) is also per-tenant via Resend domains.
+
+### 3.7 AI-first architecture
+
+The platform is designed around a **single typed service layer** exposed through three transports. This is the most important architectural decision in the document.
+
+```
+                   ┌── Admin UI (tRPC / React Server Components)
+Service layer ─────┼── MCP server (for Claude Desktop / Code / agents / ops)
+                   └── Internal jobs & cron (direct imports)
+```
+
+Every write operation (`createProduct`, `updateInventory`, `refundOrder`, `createDiscountCode`, `adjustInventory`…) lives in **one place** as a typed function with a Zod input schema and a Zod output schema. The admin UI, the MCP server, and background jobs all call the same functions. No duplication, no drift. Everything the UI can do, AI can do — by construction, not by afterthought.
+
+**Service layer rules:**
+- Every service function has: a Zod input schema, a Zod output schema, a tenant-context-aware implementation, and an audit log entry on write.
+- Destructive operations (delete, bulk update, refund above threshold) require an explicit `confirm: true` parameter.
+- Large / expensive / irreversible operations support a `dryRun: true` mode.
+- Service functions never contain transport concerns (no `req`/`res`, no HTTP status codes). Transport adapters translate.
+
+**MCP server:**
+- Self-hosted alongside the Next.js app (same deploy, separate route), implemented with `@modelcontextprotocol/sdk`.
+- Tools are auto-derived from service functions' Zod schemas — adding a tool = writing a service function + one line in the MCP registry.
+- Authentication via **personal access tokens** issued by Better Auth, scoped by tenant and role. Tokens are revocable, rotatable, rate-limited, and audit-logged on every call.
+- Tool set is **role-filtered**: a staff token sees fewer tools than an owner token; a customer support token sees only returns/refunds, etc.
+- Super-admin (platform operator) has cross-tenant tools.
+- A `run_sql_readonly` tool (sandboxed, row-limited, parameterized, no DDL) is available to owner-role tokens only, enabling ad-hoc natural-language analytics. Every query is logged.
+
+**Retrieval-augmented generation (RAG):**
+- `pgvector` extension enabled in Postgres from Phase 0.
+- Embedding pipeline: on write, product descriptions, categories, policies, blog posts, and FAQs are embedded and stored alongside source rows.
+- Used by: the customer chatbot (Phase 7), internal "ask your store" natural-language search, and semantic related-product recommendations.
+
+**Audit log:**
+- Every service write is logged with: actor type (user/agent/system), actor ID, token ID (if any), tenant, operation, input, before state, after state, outcome, timestamp, correlation ID.
+- Audit log is append-only, tenant-scoped, and retained per PDPL requirements.
+- The audit log is itself exposed as a read-only MCP tool (`search_audit_log`), so the owner can ask "who changed the price on product X and when?" in natural language.
+
+**Autonomous ops agents:**
+- Cron-triggered agents that reduce operational load:
+  - Daily digest (yesterday's sales, anomalies, stock alerts) → email/Slack
+  - Stock watchdog (low stock, velocity-based reorder suggestions)
+  - Refund/fraud watcher (anomaly detection)
+  - SEO drift watcher (Core Web Vitals + Search Console checks)
+  - Log triage (daily Sentry summary with suggested root causes)
+  - Backup verifier (weekly test restore to a temporary DB)
+- Each agent is a small Claude tool-use loop calling the MCP server.
+- Agents report to the owner; they never auto-execute destructive actions without human confirmation.
+
+### 3.8 Client-agnostic API layer (web today, mobile later)
+
+Three decisions, made in Phase 0, make a future native mobile app a drop-in rather than a refactor:
+
+1. **tRPC + React Query as the primary API transport.** End-to-end TypeScript, works natively with Next.js today, and has first-class React Native support (`@trpc/react-query` on RN) for later. The service layer (3.7) is exposed via a tRPC router; the web uses it, and a future RN app imports the same client.
+2. **Better Auth with the bearer-token plugin enabled from day one.** Web uses HTTP-only cookies (best for CSRF protection). Mobile will use `Authorization: Bearer <token>` headers. Both work against the same auth backend with no migration. Refresh token rotation and per-device sessions are enabled from the start.
+3. **All transactional surfaces behind the tRPC router, not embedded in pages.** Anything a mobile app would need — browse, cart, checkout, order tracking, returns, account — exists as a tRPC procedure, not as logic buried in a Next.js page component. Next.js pages are thin consumers of the router.
+
+**Consequence:** when (or if) we build a native mobile app later, we create a React Native + Expo project, install `@trpc/client` and `@anthropic-ai/sdk`, import the existing tRPC router types, and start calling procedures. No backend changes. Shared Zod schemas, shared i18n strings, shared business logic.
+
+**PWA first:** before committing to a native app, we'll ship a Progressive Web App (later phase, low effort). Add-to-home-screen, push notifications (iOS 16.4+ supports web push), offline catalog, Apple Pay in Safari. For AV e-commerce in KSA, a PWA likely covers 85–90% of native-app value at 5% of the cost.
+
+### 3.9 Testing philosophy & enforcement
+
+**The rule:** No frontend feature is considered done until a Playwright test exists that drives a real browser through the full user flow, in both locales, on mobile viewport, and passes in CI. Unit and integration tests are complementary, not substitutes. "Tests pass" is not the same as "feature works" — we prove features work by exercising them as a user would.
+
+This rule is non-negotiable because the codebase is AI-built. Without real browser verification, "passing" drifts from "working" in ways that surface only when a real user hits them.
+
+**What counts as "a feature":**
+- Any new page or route (public or admin)
+- Any new form or user action
+- Any auth flow (signup, login, logout, password reset, magic link, email verification)
+- Any checkout step or payment flow
+- Any new admin mutation
+- Any change that alters an existing user-facing behavior
+
+**Test requirements per feature:**
+- Happy path + at least one critical error case
+- Runs on **mobile viewport by default** (iPhone 14 / Pixel 7 profiles) — desktop is a secondary project
+- Runs in **both `en` and `ar`** (Playwright projects parameterize the locale)
+- Includes an `axe` accessibility assertion on the key pages touched
+- Completes in under 30s (quarantine flaky tests within 24h; do not retry-until-green)
+
+**Handling real-world dependencies:**
+- **Email flows (password reset, magic link, email verification):** Mailpit runs alongside the app in dev and CI. Tests trigger the email, poll the Mailpit HTTP API for the message, parse the link, and follow it in the browser — exactly what a real user does.
+- **Payments:** Moyasar test mode with test cards. Tests fill the real checkout, submit a test card, and verify the resulting order in admin. Webhooks are replayed via Playwright's `request` API.
+- **External APIs (ZATCA, Nafath, Unifonic):** network interception at the Playwright layer to stub external calls; contract is verified separately by integration tests against sandbox environments.
+- **Time-dependent logic:** Playwright's `clock` API for deterministic testing.
+
+**Test data isolation:**
+- Dedicated `test` tenant with seeded fixtures
+- Tenant-scoped tables truncated and re-seeded before each test run (not per test — too slow; per run is fine with parallel workers scoped by tenant suffix)
+- No shared mutable state between tests
+
+**Enforcement (three independent mechanisms):**
+
+1. **`CLAUDE.md` project instruction** at repo root — Claude Code reads this automatically and treats it as operational rule. Key directive: *every user-facing change must ship with a Playwright test covering the full flow in both locales on mobile viewport, and Claude must run `pnpm test:e2e` and confirm green before reporting a task as done.*
+2. **CI gate:** GitHub Actions runs `playwright test` + `lighthouse-ci` + `vitest` on every push. Coolify deploy webhook only fires on green. There is no red-to-prod path.
+3. **Coverage lint:** `scripts/check-e2e-coverage.ts` enumerates all Next.js routes + all tRPC mutations and asserts each has at least one referencing Playwright test. Fails CI if a new route lands without a test. This is the unforgeable enforcement.
+
+**AI involvement in testing:**
+- Claude Code writes Playwright tests as part of every feature, using the service layer's Zod schemas for typed inputs.
+- **Test triage agent** (Phase 4+): when a test fails in CI, an agent reads the failure + changed diff + screenshot and posts a root-cause analysis. Human confirms the fix.
+- **Exploratory agent** (Phase 8): optional Claude agent that drives Playwright in free-form mode to hunt for bugs not covered by scripted tests.
+
+---
+
+## 4. Phased Roadmap
+
+Each phase ends with a clear deliverable. Phase 0 is foundation; Phase 1 onward ship something that can be used or monetized. AI capabilities are woven into every phase, not deferred.
+
+### Phase 0 prerequisites — owner actions before Phase 0 can begin
+
+Claude Code can automate almost everything, but it cannot create accounts or prove your identity to third parties. Before a fresh Claude session starts Phase 0, the owner must have the following in hand. Claude should ask for any of these values it needs and should halt rather than guess.
+
+**Accounts and credentials (required to start Phase 0):**
+
+| Item | Purpose | What Claude needs |
+|---|---|---|
+| Hetzner Cloud account | VM hosting | API token with read/write |
+| GitHub account + an empty repo | Code hosting + Actions | Repo URL, a classic PAT or fine-grained PAT with repo + workflow scopes |
+| Anthropic (Claude) API key | All AI features from day zero | `ANTHROPIC_API_KEY` |
+| Voyage AI API key | Embeddings for pgvector | `VOYAGE_API_KEY` |
+| Sentry account (free tier) | Error observability | Project DSN |
+| A registered domain + DNS provider access | Custom domains per tenant | Registrar credentials or API access (Cloudflare recommended for DNS + WAF) |
+| **Two domain names chosen** for the main tenant and the sister tenant | Phase 0 wires at least one into Traefik/Coolify | The actual strings (e.g., `brand-a.com`, `brand-b.com`) |
+| A local machine with Docker, pnpm, and Node 20 LTS installed | Running the dev loop and Playwright locally | — |
+
+**Accounts deferred but worth starting the paperwork for (can be collected later):**
+
+| Item | Needed by | Notes |
+|---|---|---|
+| Moyasar merchant account | Phase 2 (commerce MVP) | Requires a Saudi Commercial Registration (CR). **Start the application early — it is the slowest prerequisite on the path to first revenue.** Test mode works without approval. |
+| Resend account + domain verification per tenant | Phase 2 (transactional email) | DKIM records must be added per tenant domain |
+| Unifonic account | Phase 2 (SMS/OTP) | KSA-based provider, CR-friendly |
+| BunnyCDN account | Phase 1 (media delivery) | Storage zone + pull zone per tenant |
+| ZATCA Fatoora portal registration | Phase 6 (e-invoicing) | Requires CR and VAT number; plan to start paperwork in Phase 4 |
+| Nafath aggregator agreement (IAMX, Elm, or equivalent) | Phase 7 (identity verification) | 4–6 week lead time; start during Phase 5 |
+| Apple Developer account | Phase 7 (Apple Pay domain verification) | Not needed before checkout goes live |
+
+**Decisions the owner must make before Phase 0:**
+
+1. **The two launch domain names.** Phase 5 launches them; Phase 0 needs at least one real name to wire into Coolify. Placeholders are acceptable for local dev but production domains must be real before Phase 5.
+2. **Company legal entity / CR number** for KSA compliance (used for VAT, ZATCA, Moyasar onboarding).
+3. **Admin email address** for the first owner account and for Sentry / Resend / Hetzner notifications.
+4. **Slack or email channel** where daily digests and agent alerts will land.
+5. **Brand assets** (logos in SVG, primary + secondary colors, font license if using a custom typeface) for at least the main tenant.
+
+**What Claude Code will do in the first Phase 0 session:**
+
+1. Read `prd.md` and `CLAUDE.md` fully.
+2. Ask the owner for the values in the tables above that are needed *right now* (Hetzner token, GitHub repo, Claude API key, Voyage key, Sentry DSN, the first domain name). Defer the rest.
+3. Store secrets in Coolify / GitHub Actions, never commit them.
+4. Halt on anything it cannot obtain, explaining exactly what is missing.
+
+---
+
+### Phase 0 — Foundation (not shippable)
+
+**Goal:** Infra, schema, auth skeleton, AI primitives, API layer, and deploy pipeline in place. Nothing user-visible.
+
+**Work:**
+
+*Infrastructure*
+- Hetzner Cloud VM provisioned (CCX or CPX class, Ubuntu LTS)
+- Coolify installed and configured
+- Postgres (with `pgvector`), Redis, Meilisearch running as Coolify-managed services
+- BunnyCDN storage bucket + pull zone created
+- GitHub repo + Actions → Coolify deploy webhook
+- Env management + secrets in Coolify
+- Sentry wired up
+- Nightly pg_dump → Hetzner Storage Box
+- Basic health check / uptime monitoring
+
+*Application*
+- Next.js 15 app scaffolded with TypeScript, Tailwind, shadcn/ui, Drizzle, Better Auth
+- **tRPC router scaffolded** with tenant-scoped context and auth guards
+- **Better Auth with bearer-token plugin enabled** (cookies for web, tokens ready for mobile)
+- Base DB schema migrated (tenants, users, sessions, access_tokens, products, variants, options, categories, orders, order_items, addresses, carts, redirects, verifications, audit_log, embeddings — all with `tenant_id` + RLS policies where applicable)
+- Service layer pattern established: one example service function end-to-end (`createProduct`) wired to tRPC, MCP, and audit log
+- Tenant resolution middleware (`Host` header → tenant context)
+- i18n routing middleware (`/en`, `/ar`)
+
+*AI primitives*
+- `@anthropic-ai/sdk` initialized; Claude API key in env
+- MCP server skeleton running (one tool live end-to-end as proof)
+- Personal access token model in Better Auth (tenant- and role-scoped)
+- Audit log middleware wrapping every service-layer write
+- Embedding pipeline stub: on `createProduct`, generate embedding and store in pgvector
+- `run_sql_readonly` tool stubbed (gated, not yet exposed)
+
+*Testing infrastructure*
+- Playwright installed and configured with mobile-first projects (iPhone 14, Pixel 7) + locale-parameterized projects (`en`, `ar`)
+- `@axe-core/playwright` wired into a shared test helper
+- Mailpit container running in Coolify + docker-compose for local dev
+- Vitest configured for unit/integration tests
+- Lighthouse CI configured with mobile perf budgets (LCP, INP, CLS, JS bundle size)
+- GitHub Actions workflow: lint → typecheck → vitest → playwright → lighthouse-ci → deploy webhook (fails-closed)
+- `scripts/check-e2e-coverage.ts` created — enumerates routes + tRPC mutations, asserts each has a Playwright test
+- `CLAUDE.md` created at repo root with the testing rule and vibe-coding operational guidance
+- One example Playwright test covering the seeded "hello world" page in both locales on mobile viewport — proves the whole pipeline is green end-to-end
+
+**Exit criteria:** A "hello world" page resolves on two different local-dev domains, each in both English and Arabic, with tenant isolation working at the DB level. The MCP server is reachable with a personal access token, and a test tool call against the single example service function succeeds and appears in the audit log. A tRPC procedure is callable from the web and returns typed data. **A Playwright test runs the hello-world page in both locales on mobile viewport, passes axe, meets Lighthouse budgets, and CI is green end-to-end. The coverage lint script passes.**
+
+---
+
+### Phase 1 — Catalog MVP + AI product entry (shippable as a browse-only site)
+
+**Goal:** A live, crawlable product catalog for the main tenant, with product content in English. UI chrome is translated in both locales from day one (signup, nav, footer, form labels, buttons — the translatable-string surface that doesn't depend on product data); the `/ar/` route is live with RTL layout but product content falls back to English per the policy in section 3.2. Full Arabic product content is Phase 3. The owner can add products via the admin UI **or** via natural language through Claude, with AI-assisted content generation. Customers can browse; they can't buy yet.
+
+**Work:**
+
+*Catalog*
+- Service layer + tRPC procedures: `createProduct`, `updateProduct`, `deleteProduct`, `listProducts`, `getProduct`, `uploadImage`, `createCategory`, `updateVariant`, etc.
+- Admin CRUD UI for categories, products, variants, options, images — thin tRPC consumer
+- Public storefront pages:
+  - Home (featured products, categories)
+  - Category listing with filters (brand, price range, option facets)
+  - Product detail page (variant selector, gallery, specs, related products)
+  - Search (Meilisearch-powered)
+  - Basic static pages (about, contact)
+- SEO: metadata, JSON-LD, sitemap, robots.txt, canonical URLs
+- Image pipeline: upload → BunnyCDN → responsive `next/image`
+- Mobile-first responsive design (see NFRs in section 6)
+- Seed script with 20–30 realistic AV products across 2–3 categories for dev
+- Cookie consent banner (PDPL-ready)
+
+*AI-assisted content entry*
+- Admin product form has an "AI assist" panel:
+  - One paragraph of English (or Arabic) input → auto-generate title, description, SEO title, SEO meta description, suggested category, suggested tags, and the other-language translation
+  - Image upload → AI-generated alt text (Claude vision) in both locales
+  - Optional: upload a product manual or spec sheet → AI extracts structured specs
+- All AI assists are editable; nothing is auto-published without owner confirmation
+- Embeddings generated on product write for future semantic search
+
+*MCP surface for catalog*
+- MCP tools live: `create_product`, `update_product`, `delete_product`, `search_products`, `get_product`, `list_categories`, `create_category`
+- Owner can add/update products directly from Claude Desktop against the staging tenant
+
+**Exit criteria:** The main tenant's domain is live, publicly accessible, indexable, and shows real products with working variant selection. The owner can add a product via Claude Desktop using natural language, and the product appears live on the site within seconds. A shopper can find a product via Google and view it — but cannot buy. **Playwright coverage: home, category listing (with filters), product detail (with variant selection), search, admin product CRUD. Tests run in both `en` and `ar` on mobile viewport; the `ar` tests assert RTL layout, chrome translation, and the English-fallback behavior for product content. CI green including Lighthouse budgets.**
+
+**Why ship this:** SEO takes weeks to build traction. Start the clock early, and start proving the AI-native workflow early.
+
+---
+
+### Phase 2 — Commerce MVP + commerce MCP tools (FIRST REVENUE)
+
+**Goal:** A shopper can complete a real purchase with real money. English only. KSA only. The owner can manage orders via Claude.
+
+**Work:**
+
+*Commerce*
+- Cart (persistent, guest-allowed, variant-aware)
+- Guest checkout (email + KSA National Address format + phone with `+966` validation)
+- Shipping zones + flat-rate / weight-based shipping rules
+- VAT calculation (15% KSA)
+- Moyasar integration: Mada, Visa/MC, Apple Pay
+- Order creation + stock decrement (transactional — no overselling)
+- Order confirmation email (Resend) + SMS (Unifonic) in English
+- Basic admin order view (list, detail, mark as shipped/cancelled)
+- Shipping integration stub (manual tracking number entry for now; carrier API later)
+- Refund flow (admin-initiated, Moyasar refund API)
+- Invoice PDF generation (ZATCA-schema-compliant data model, not yet submitted to ZATCA)
+
+*MCP surface for commerce*
+- MCP tools live: `list_orders`, `get_order`, `refund_order` (with `confirm: true`), `mark_order_shipped`, `adjust_inventory`, `get_inventory`, `search_customers`, `get_customer`
+
+*First autonomous agents*
+- **Daily digest agent** (cron): summarizes yesterday — new orders, revenue, top products, low stock, anomalies — and emails the owner. Implemented as a Claude tool-use loop calling the MCP server.
+- **Stock watchdog agent** (cron, hourly): scans inventory, flags low-stock variants with velocity-based reorder suggestions.
+
+**Exit criteria:** A real customer can place and pay for a real order, get a confirmation, and the admin can fulfill it. First riyal earned. The owner receives a daily digest email and can refund/ship orders from Claude Desktop. **Playwright coverage: full cart → guest checkout → Moyasar test-card payment → order confirmation email (via Mailpit) → admin marks shipped → customer sees shipped status. Refund flow end-to-end. All in both locales on mobile viewport.**
+
+---
+
+### Phase 3 — Arabic launch + bilingual AI (REAL KSA LAUNCH)
+
+**Goal:** The platform is genuinely KSA-native. Arabic is the primary experience, and all AI capabilities work in Arabic.
+
+**Work:**
+- Full Arabic translations of UI strings (translation file + simple translation management UI)
+- RTL audit and fixes across every page
+- Arabic product content entry in admin (the JSONB fields filled out; AI assists with translation from English where missing)
+- Arabic search tuning in Meilisearch (stop words, normalization of ا/أ/إ, ة/ه, ي/ى)
+- hreflang tags
+- Locale switcher component
+- Arabic transactional emails and SMS
+- Arabic typography polish (font loading; Western numerals 0–9 for prices to match banking UX in KSA)
+- **Bilingual AI:**
+  - MCP tools accept and respond in Arabic
+  - Daily digest available in Arabic
+  - AI content generation produces Arabic that reads natively (not machine-translated feel) — system prompt tuned and evaluated against a held-out set of real AV product descriptions
+
+**Exit criteria:** A monolingual Arabic speaker can discover, browse, purchase, and receive confirmations entirely in Arabic. The owner can run the store via Claude entirely in Arabic. **Playwright coverage: every existing test runs green in `ar` locale. New visual regression snapshots capture RTL layout for home, product detail, and checkout. Arabic transactional emails asserted via Mailpit.**
+
+---
+
+### Phase 4 — Accounts, Inventory, Admin v2, "Chat with your store"
+
+**Goal:** The business can run on the platform day-to-day, and the owner barely ever opens a dashboard.
+
+**Work:**
+
+*Accounts & ops*
+- Better Auth: email/password + magic link + social (Google, Apple)
+- User account area: profile, addresses, order history, reorder
+- Wishlist
+- Inventory management UI: stock levels per variant, low-stock alerts, stock adjustments with reason codes, stock movement history
+- Admin dashboard v2: sales metrics, top products, low stock, abandoned carts overview
+- Order fulfillment workflow: pending → paid → packed → shipped → delivered, with timestamps
+- Discount codes (percentage / fixed, per-product / cart-wide, usage limits, expiry)
+- Returns & refund workflow (customer-initiated request → admin approval → refund)
+- Role-based admin: owner, staff, support
+
+*"Chat with your store" interface*
+- Dedicated `/admin/chat` page: a Claude-powered chat bound to the MCP server via the current user's personal access token
+- Natural language queries for sales analysis, revenue, inventory, customer lookups, discount creation, order management
+- `run_sql_readonly` tool fully exposed (owner role only) for ad-hoc analytics: "show me average order value by category this quarter"
+- Streaming responses via Vercel AI SDK
+- Conversation history persisted per-user, searchable
+
+*New autonomous agents*
+- **Refund/fraud watcher:** flags unusual refund or chargeback patterns
+- **SEO drift watcher:** Core Web Vitals + Search Console checks weekly, alerts on drops
+- **Log triage:** daily Sentry summary with suggested root causes
+
+**Exit criteria:** The owner can run the store without opening the admin dashboard for routine tasks. Answers to "how is the business doing" arrive in chat in seconds. The agents catch the issues a human would otherwise miss. **Playwright coverage: signup → magic link (via Mailpit) → login → password reset (via Mailpit) → account profile → order history → reorder → discount code apply → return request → admin approval. `/admin/chat` page sends a message and receives a streamed response. All in both locales on mobile viewport.**
+
+---
+
+### Phase 5 — Second tenant launch + tenant-aware MCP
+
+**Goal:** Sister company goes live on its own domain, its own catalog, its own branding, its own AI agents.
+
+**Work:**
+- Tenant onboarding flow (create tenant, assign domain, upload logo, theme tokens, locale defaults)
+- Per-tenant theming (CSS variables driven by tenant config)
+- Custom domain setup in Coolify/Traefik with auto-SSL
+- Tenant-scoped admin (admins only see their tenant's data)
+- Platform super-admin view for the owner to manage all tenants
+- Separate Sentry projects per tenant
+- Separate analytics properties per tenant
+- Multi-tenant audit: re-verify RLS policies, adversarial isolation testing
+- Separate Resend sender domains per tenant
+- **Tenant-aware MCP:** personal access tokens scoped to tenant; super-admin tokens offer cross-tenant tools (`list_tenants`, `create_tenant`, cross-tenant analytics)
+- Per-tenant daily digests and agent runs
+
+**Exit criteria:** Both brands live on their own domains, fully isolated, fully branded, running from one codebase and one deploy. The owner can ask Claude "how did tenant A do vs tenant B last week" and get a real answer. **Playwright coverage: adversarial tenant isolation tests — tenant A user cannot see or mutate tenant B data via any surface (UI, tRPC, MCP). Per-tenant theming asserted via screenshot diff. Tenant-scoped token tests: an A-scoped token rejected on B-scoped operations.**
+
+---
+
+### Phase 6 — ZATCA e-invoicing
+
+**Goal:** Legally compliant invoicing in KSA.
+
+**Work:**
+- Decide SDK vs direct ZATCA API (evaluate Wafeq, ClearTax, Zoho Books API, or direct integration)
+- Invoice hash chain implementation
+- QR code generation (Base64 TLV payload per ZATCA spec)
+- Clearance (B2B) and reporting (B2C) integration
+- Cryptographic signing (CSID / PCSID provisioning flow)
+- Invoice storage and retrieval (6-year retention)
+- Credit notes and debit notes
+- Sandbox → production cutover plan
+- MCP tools: `get_invoice`, `resubmit_invoice_to_zatca`, `list_invoices`
+
+**Exit criteria:** Every sale produces a ZATCA-compliant invoice submitted to the Fatoora portal, with QR code printable on receipts. **Playwright coverage: checkout → invoice generated → QR code renders on receipt page → invoice PDF downloadable. Integration tests (Vitest) against the ZATCA sandbox for hash chain and signature correctness.**
+
+---
+
+### Phase 7 — Customer-facing AI + growth features
+
+**Goal:** Features that move the needle on conversion, AOV, retention — led by the customer-facing AI assistant.
+
+**Work:**
+
+*Customer AI assistant*
+- Embedded chatbot on storefront (bilingual Arabic/English), streaming UI
+- RAG over product catalog (pgvector), policies, blog, FAQ, product manuals
+- Strictly scoped tools: `search_products`, `get_product`, `check_stock`, `get_my_order` (authenticated user only), `start_return`, `handoff_to_human` (WhatsApp)
+- Hard-enforced server-side scoping — cannot see other users' data, cannot mutate beyond current user's scope
+- Per-session rate limits, cost guardrails, output filtering for PII
+- System prompt forbids hallucinating product specs — model must ground every factual claim in retrieved context
+- Conversation handoff to human via WhatsApp Business link when the bot can't resolve
+
+*AI-assisted growth features*
+- AI-generated abandoned cart emails (personalized copy per recovered cart)
+- AI blog post drafting (SEO content marketing) with owner review
+- AI-powered cross-sell / upsell recommendations
+
+*Other growth features*
+- **BNPL:** Tabby and Tamara via Moyasar or direct
+- **Nafath integration** (identity verification for high-value orders, B2B accounts, fraud-flagged orders) — see section 5
+- **Reviews & ratings** with photo uploads, moderated (AI-assisted moderation)
+- **Product bundles**
+- **Newsletter + marketing opt-in** (PDPL-compliant double opt-in)
+- **Blog / content marketing** (MDX or small CMS)
+- **Gift cards** (if desired)
+- **Loyalty points** (if desired)
+- **Referral program**
+
+**Exit criteria:** Storefront chatbot answers product questions in Arabic and English, grounded in the catalog. Abandoned cart recovery emails are AI-generated and measurably lifting recovered revenue. **Playwright coverage: customer bot happy-path conversations in both locales; adversarial prompt-injection tests assert the bot refuses to reveal other users' data; BNPL checkout flow with Tabby/Tamara test mode; review submission with moderation; Nafath sandbox verification flow.**
+
+---
+
+### Phase 8 — Hardening, scale, AI safety
+
+**Goal:** Sleep well at night.
+
+**Work:**
+
+*Traditional hardening*
+- Full observability: structured logs, metrics dashboards, alerting
+- Load testing (k6 or Artillery)
+- Performance pass: Core Web Vitals at p75 on mid-range Android over 4G
+- Security audit: dependency scanning, OWASP top 10 review, rate limiting, WAF rules
+- Disaster recovery drill: restore from backup, measure RTO
+- Read replicas for Postgres if query load justifies it
+- CDN cache tuning
+- Database index tuning based on real query patterns
+
+*AI safety*
+- Prompt injection red-teaming for customer bot (adversarial test set)
+- Cost monitoring and budget caps on Claude API, per agent and per tenant
+- Output filtering and PII scrubbing in AI responses
+- Agent behavior audit (what tools were called, with what args, with what outcomes)
+- Eval harness for AI content generation (factuality, tone, Arabic quality)
+
+*PWA polish*
+- Add-to-home-screen manifest
+- Web push (iOS 16.4+ supported)
+- Offline catalog browsing
+- Service worker with sensible cache policy
+
+---
+
+## 5. Future-proofing for Nafath (design now, build later)
+
+To make Phase 7's Nafath integration a drop-in rather than a refactor, Phase 0 bakes in:
+
+1. `users.identity_verified` (boolean), `users.identity_verified_at` (timestamp), `users.identity_provider` (string)
+2. A `verifications` table recording every verification event: provider, level, timestamp, expiry, metadata (encrypted)
+3. Better Auth as the auth layer from day one (Nafath = adding a custom OIDC provider later)
+4. Encrypted-at-rest storage for national ID (pgcrypto or app-level envelope encryption)
+5. An abstract `IdentityVerificationService` interface — the only implementation in Phase 0–6 is a no-op — so that adding Nafath later is wiring, not plumbing.
+
+---
+
+## 6. Non-functional requirements
+
+### 6.1 Performance (mobile-first, hard constraints)
+
+- **p75 LCP < 2.5s** on mid-range Android over 4G, measured from KSA, for public catalog pages.
+- **p75 INP < 200ms** on the same profile.
+- **p75 CLS < 0.1.**
+- JS bundle budget for public pages: **< 200 KB gzipped** on initial load (excluding images).
+- Arabic and Latin fonts self-hosted via `next/font`, subset aggressively, `font-display: swap`.
+- All public pages SSR/ISR; no client-only rendering for product/category pages.
+- Images via `next/image` with explicit `sizes`, AVIF/WebP, blur placeholders, lazy below the fold.
+- **Enforced automatically by Lighthouse CI in GitHub Actions.** A PR that regresses any budget above fails CI and blocks deploy. Not measured manually.
+
+### 6.2 Mobile-first UX (hard rules from Phase 0)
+
+- Design breakpoints start at **360px** and scale up. No "design for desktop then shrink."
+- Bottom navigation on storefront mobile views (categories / search / cart / account); sticky CTA on product pages so "Add to cart" is always thumb-reachable.
+- Touch targets **≥ 44×44px**. No hover-dependent UI anywhere — every hover state has a tap equivalent.
+- Form UX: `inputmode` hints, `autocomplete` attributes, Arabic keyboard support, `+966` phone prefix built into the control.
+- No layout shift — reserve space for images, async content, cart badge.
+- Testing on real mid-range Android device before each phase exit, not just Chrome DevTools.
+
+### 6.3 Availability & ops
+
+- **Availability:** 99.5% at launch, 99.9% once the business depends on it.
+- **Backups:** nightly full + WAL archiving; quarterly restore drill.
+- **Security:** HTTPS everywhere, HSTS, CSP, rate limiting on auth + checkout, encrypted secrets, least-privilege DB users per service.
+- **PDPL:** consent, export, deletion, audit log for sensitive field access.
+- **Accessibility:** WCAG 2.1 AA for public storefront.
+
+### 6.4 AI-specific NFRs
+
+- **Latency:** owner-facing MCP calls complete in < 2s p95 for read tools.
+- **Cost ceiling:** monthly Claude API spend capped per tenant with circuit breaker; alert at 80%.
+- **Grounding:** customer bot must ground every factual claim in retrieved context; no free-form spec claims.
+- **Safety:** customer bot cannot call mutation tools beyond the authenticated user's own scope.
+
+---
+
+## 7. Open questions / decisions deferred
+
+- **ZATCA provider:** SDK vs direct API — decide at start of Phase 6.
+- **Shipping carriers:** SMSA vs Aramex vs Naqel vs SPL — decide during Phase 2 based on business relationships.
+- **B2B features:** do either tenant sell to businesses (tax-exempt, quotes, purchase orders, net-30 terms)? If yes, this is a meaningful Phase 4–5 addition.
+- **Repair / service / installation:** AV companies often offer installation. Is this in scope? Would add a service-booking module.
+- **Returns policy specifics:** KSA consumer protection law has specific rules — confirm with legal.
+- **Embeddings provider:** Voyage AI (better multilingual) vs OpenAI — decide in Phase 0 with a quick Arabic-quality A/B.
+- **PWA phase:** target Phase 8 for full PWA polish, but basic manifest + installability can arrive earlier if cheap.
+- **Native mobile app:** React Native + Expo, deferred to "much later" (Phase 50, per user). The three decisions in section 3.8 ensure no refactor is required when the time comes.
+
+---
+
+## 8. What is explicitly NOT in scope (at least for now)
+
+- Native mobile apps — deferred. Web is mobile-first; PWA fills the gap. Architecture in section 3.8 keeps a native app as a future drop-in.
+- Marketplace model (third-party sellers)
+- Subscriptions / recurring billing
+- Live chat with humans (Phase 7 customer bot + WhatsApp handoff replaces it)
+- Custom ERP integrations (we are the ERP)
+- International shipping outside Gulf
+
+---
+
+## 9. AI risk & cost controls
+
+AI is first-class, which means its failure modes are first-class too. These controls are designed in from Phase 0, not bolted on later.
+
+### 9.1 Cost controls
+
+- **Model routing:** Haiku for classification, routing, and simple extraction. Sonnet for reasoning, content generation, and agent tool loops. Opus only for complex multi-step agent work.
+- **Prompt caching** enabled for long system prompts and RAG context.
+- **Per-tenant monthly budget cap** on Claude API spend, with circuit breaker that disables non-essential AI features when hit.
+- **Alert at 80%** of cap to the owner via the daily digest.
+- **Customer bot rate limits:** per-session, per-IP, per-authenticated-user.
+- **Response caching:** identical customer queries within a short window return cached answers.
+
+### 9.2 Prompt injection & safety (customer bot)
+
+- Tools are **hard-scoped server-side** to the authenticated user's own data. Prompt cannot widen scope.
+- **Never trust model output as a tool argument selector alone** — always validate against the authenticated user's permissions and the tool's Zod schema.
+- Output filtering: strip anything that looks like a token, email, phone, national ID, or order from another user.
+- System prompt explicitly forbids role-playing, instructions in user content, and "ignore previous instructions" style prompts.
+- Adversarial test suite maintained from Phase 7 onward.
+
+### 9.3 AI mistakes in writes (operator MCP)
+
+- Destructive tools (`delete_*`, `bulk_update_*`, `refund_order` above threshold) require `confirm: true`.
+- Dry-run mode for bulk operations returns a preview without executing.
+- Complete audit log of every tool call with before/after state.
+- Soft deletes for catalog entities (products, categories) with a recovery window.
+- Financial operations (refunds, discounts over a threshold) require a second confirmation step even from the owner.
+
+### 9.4 Hallucination in customer-facing content
+
+- Customer bot is **strictly RAG-grounded.** System prompt forbids stating any spec, price, or availability that isn't in the retrieved context.
+- AI-generated product copy, blog posts, and abandoned cart emails all require owner review before publishing/sending (no auto-publish).
+- Eval harness (Phase 8) checks AI-generated Arabic against a held-out reference set.
+
+### 9.5 Token security
+
+- Personal access tokens are tenant- and role-scoped, short-lived, revocable.
+- Tokens are never logged.
+- Token rotation is one click in admin.
+- Rate limit per token.
+- All MCP calls audit-logged with token ID (not token value).
