@@ -2,7 +2,7 @@
 
 **Status:** Draft v2
 **Owner:** Bassel
-**Last updated:** 2026-04-14
+**Last updated:** 2026-04-17
 
 ---
 
@@ -135,7 +135,7 @@ The platform is the **source of truth** for products, inventory, and orders — 
 - **Arabic typography:** IBM Plex Sans Arabic or Tajawal loaded via `next/font`. Latin typography: Inter via `next/font`.
 - **Arabic slugs:** Allow real Arabic in URLs (Google indexes them correctly). Product slugs are per-locale: `/en/products/sony-a7iv` ↔ `/ar/products/سوني-a7iv`.
 - **hreflang:** Emit `hreflang="ar-SA"` and `hreflang="en-SA"` + `x-default` on every public page.
-- **Locale fallback policy:** Content fields (product name, description, page copy, etc.) are stored per-locale in JSONB. When a field is missing in the requested locale, the public storefront **falls back to the other locale silently** — the shopper always sees something, never a broken placeholder. The admin UI, by contrast, **surfaces missing translations explicitly** with a visible badge so the owner knows what still needs translating. This policy is what makes the phased rollout work: Phase 1 ships in English with i18n routing already live, and an `/ar/` visit sees English product content inside Arabic-localized chrome (nav, footer, buttons) with RTL layout applied. Phase 3 backfills Arabic content without any code changes.
+- **Locale fallback policy:** Content fields (product name, description, page copy, etc.) are stored per-locale in JSONB. When a field is missing in the requested locale, the public storefront **falls back to the other locale silently** — the shopper always sees something, never a broken placeholder. The admin UI, by contrast, **surfaces missing translations explicitly** with a visible badge so the owner knows what still needs translating. **The fallback is a safety net, not a launch strategy:** the platform launches bilingually in Phase 1b, with every seeded and live product carrying both `ar` and `en` content. The fallback exists to handle individual missing fields gracefully (e.g., a newly added product where the owner hasn't yet filled in one locale) — not to ship a half-translated experience.
 
 ### 3.3 Product variants (Samsung-style)
 
@@ -196,6 +196,7 @@ Every write operation (`createProduct`, `updateInventory`, `refundOrder`, `creat
 - Destructive operations (delete, bulk update, refund above threshold) require an explicit `confirm: true` parameter.
 - Large / expensive / irreversible operations support a `dryRun: true` mode.
 - Service functions never contain transport concerns (no `req`/`res`, no HTTP status codes). Transport adapters translate.
+- **Tier-B fields (see §6.5) require role-gated output schemas.** A service function returning a product to a customer-facing transport must omit `cost_price`, `supplier_notes`, and any other internal-only field; the same function called from an owner-role admin context returns them. The output schema, not the caller, is the gate — this prevents accidental leakage when a new transport (e.g., a future mobile app, a new MCP tool) reuses the same service function.
 
 **MCP server:**
 - Self-hosted alongside the Next.js app (same deploy, separate route), implemented with `@modelcontextprotocol/sdk`.
@@ -212,6 +213,7 @@ Every write operation (`createProduct`, `updateInventory`, `refundOrder`, `creat
 
 **Audit log:**
 - Every service write is logged with: actor type (user/agent/system), actor ID, token ID (if any), tenant, operation, input, before state, after state, outcome, timestamp, correlation ID.
+- **Reads of Tier-A fields (see §6.5) are also audit-logged** — including which actor decrypted a national ID or verification payload, when, and from what surface. Reads of Tier-B and Tier-C fields are not audit-logged (would drown the log in noise); access to those is controlled via role-gated output schemas and RLS instead.
 - Audit log is append-only, tenant-scoped, and retained per PDPL requirements.
 - The audit log is itself exposed as a read-only MCP tool (`search_audit_log`), so the owner can ask "who changed the price on product X and when?" in natural language.
 
@@ -382,48 +384,76 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 
 ---
 
-### Phase 1 — Catalog MVP + AI product entry (shippable as a browse-only site)
+### Phase 1a — Catalog backbone + bilingual AI product entry (not shippable, internal milestone)
 
-**Goal:** A live, crawlable product catalog for the main tenant, with product content in English. UI chrome is translated in both locales from day one (signup, nav, footer, form labels, buttons — the translatable-string surface that doesn't depend on product data); the `/ar/` route is live with RTL layout but product content falls back to English per the policy in section 3.2. Full Arabic product content is Phase 3. The owner can add products via the admin UI **or** via natural language through Claude, with AI-assisted content generation. Customers can browse; they can't buy yet.
+**Goal:** The owner can create and manage fully bilingual products end-to-end — via the admin UI and via Claude. The public storefront does not exist yet; this phase exists to prove the bilingual content pipeline before any public traffic sees it.
 
 **Work:**
 
-*Catalog*
+*Catalog (admin-side)*
 - Service layer + tRPC procedures: `createProduct`, `updateProduct`, `deleteProduct`, `listProducts`, `getProduct`, `uploadImage`, `createCategory`, `updateVariant`, etc.
 - Admin CRUD UI for categories, products, variants, options, images — thin tRPC consumer
-- Public storefront pages:
-  - Home (featured products, categories)
-  - Category listing with filters (brand, price range, option facets)
-  - Product detail page (variant selector, gallery, specs, related products)
-  - Search (Meilisearch-powered)
-  - Basic static pages (about, contact)
-- SEO: metadata, JSON-LD, sitemap, robots.txt, canonical URLs
+- Bilingual content model wired throughout admin: every translatable field (name, description, SEO title/meta) is a JSONB `{ en, ar }` input pair; missing-translation badge surfaced per field
 - Image pipeline: upload → BunnyCDN → responsive `next/image`
-- Mobile-first responsive design (see NFRs in section 6)
-- Seed script with 20–30 realistic AV products across 2–3 categories for dev
-- Cookie consent banner (PDPL-ready)
-
-*AI-assisted content entry*
-- Admin product form has an "AI assist" panel:
-  - One paragraph of English (or Arabic) input → auto-generate title, description, SEO title, SEO meta description, suggested category, suggested tags, and the other-language translation
-  - Image upload → AI-generated alt text (Claude vision) in both locales
-  - Optional: upload a product manual or spec sheet → AI extracts structured specs
-- All AI assists are editable; nothing is auto-published without owner confirmation
 - Embeddings generated on product write for future semantic search
+
+*AI-assisted bilingual entry*
+- Admin product form has an "AI assist" panel:
+  - One paragraph of input in **either** Arabic or English → auto-generate title, description, SEO title, SEO meta description, suggested category, suggested tags, **and the other-language translation**. Bilingual generation is mandatory, not optional.
+  - Image upload → AI-generated alt text (Claude vision) in both `ar` and `en`
+  - Optional: upload a product manual or spec sheet → AI extracts structured specs in both locales
+- Arabic output is system-prompted to read natively (not machine-translated feel); the held-out Arabic evaluation set is begun in this phase and refined in Phase 3
+- All AI assists are editable; nothing is auto-published without owner confirmation
 
 *MCP surface for catalog*
 - MCP tools live: `create_product`, `update_product`, `delete_product`, `search_products`, `get_product`, `list_categories`, `create_category`
-- Owner can add/update products directly from Claude Desktop against the staging tenant
+- Tools accept and return bilingual fields; owner can drive product entry from Claude Desktop in either language
 
-**Exit criteria:** The main tenant's domain is live, publicly accessible, indexable, and shows real products with working variant selection. The owner can add a product via Claude Desktop using natural language, and the product appears live on the site within seconds. A shopper can find a product via Google and view it — but cannot buy. **Playwright coverage: home, category listing (with filters), product detail (with variant selection), search, admin product CRUD. Tests run in both `en` and `ar` on mobile viewport; the `ar` tests assert RTL layout, chrome translation, and the English-fallback behavior for product content. CI green including Lighthouse budgets.**
+**Exit criteria:** The owner can add a fully bilingual product (`ar` + `en` content, images with alt text in both languages) via the admin UI **or** via Claude Desktop, and verify it via tRPC and MCP tool calls. No public storefront yet. **Playwright coverage: admin product CRUD with bilingual content entry; AI assist panel happy path in both directions (`ar`→`en` and `en`→`ar`); missing-translation badge displays correctly. All on mobile viewport. CI green.**
 
-**Why ship this:** SEO takes weeks to build traction. Start the clock early, and start proving the AI-native workflow early.
+---
+
+### Phase 1b — Public bilingual storefront (shippable as a browse-only site)
+
+**Goal:** The main tenant's domain is live, publicly indexable, and browseable in both Arabic and English from day one. Customers can find and view products in their preferred language with proper RTL layout; they cannot buy yet.
+
+**Work:**
+
+*Public storefront pages*
+- Home (featured products, categories)
+- Category listing with filters (brand, price range, option facets)
+- Product detail page (variant selector, gallery, specs, related products)
+- Search (Meilisearch-powered, with Arabic tokenization tuned: stop words, normalization of ا/أ/إ, ة/ه, ي/ى)
+- Basic static pages (about, contact)
+- Mobile-first responsive design (see NFRs in section 6)
+
+*Bilingual launch surface*
+- All seed products (20–30 realistic AV products across 2–3 categories) carry both `ar` and `en` content from launch
+- Locale switcher component
+- `hreflang` tags emitted on every public page (`ar-SA`, `en-SA`, `x-default`)
+- Per-locale Arabic-friendly slugs supported (e.g., `/ar/products/سوني-a7iv`)
+- RTL audit pass across every built public page
+- Arabic typography (IBM Plex Sans Arabic or Tajawal) and Latin (Inter) loaded via `next/font`, aggressively subset
+
+*SEO*
+- `generateMetadata` with per-locale titles, descriptions, OG tags
+- JSON-LD: `Product`, `Offer`, `BreadcrumbList`, `Organization`
+- Sitemaps per tenant per locale, referenced in `robots.txt`
+- Canonical URLs (critical when the same product lives under multiple categories)
+- Image sitemaps (AV is visual)
+
+*Compliance & polish*
+- Cookie consent banner (PDPL-ready)
+
+**Exit criteria:** The main tenant's domain is live, publicly accessible, indexable in both languages, and shows real bilingual products with working variant selection. A monolingual Arabic shopper can discover, browse, and view a product entirely in Arabic with proper RTL layout and Arabic search. The owner can add a product via Claude Desktop and see it live on the site within seconds — in both languages. A shopper can find a product via Google in either language and view it — but cannot buy. **Playwright coverage: home, category listing (with filters), product detail (with variant selection), search. Tests run in both `en` and `ar` on mobile viewport; the `ar` tests assert RTL layout, real Arabic content rendering (not fallback), and Arabic search results. CI green including Lighthouse budgets.**
+
+**Why ship this:** SEO takes weeks to build traction in **both** languages. Start the clock early on both, not just one. The bilingual seed catalog from Phase 1a makes this a launch, not a placeholder.
 
 ---
 
 ### Phase 2 — Commerce MVP + commerce MCP tools (FIRST REVENUE)
 
-**Goal:** A shopper can complete a real purchase with real money. English only. KSA only. The owner can manage orders via Claude.
+**Goal:** A shopper can complete a real purchase with real money — in Arabic or English. KSA only. The owner can manage orders via Claude.
 
 **Work:**
 
@@ -434,7 +464,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - VAT calculation (15% KSA)
 - Moyasar integration: Mada, Visa/MC, Apple Pay
 - Order creation + stock decrement (transactional — no overselling)
-- Order confirmation email (Resend) + SMS (Unifonic) in English
+- Order confirmation email (Resend) + SMS (Unifonic) — bilingual templates rendered per the customer's locale preference at order time
 - Basic admin order view (list, detail, mark as shipped/cancelled)
 - Shipping integration stub (manual tracking number entry for now; carrier API later)
 - Refund flow (admin-initiated, Moyasar refund API)
@@ -447,29 +477,26 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - **Daily digest agent** (cron): summarizes yesterday — new orders, revenue, top products, low stock, anomalies — and emails the owner. Implemented as a Claude tool-use loop calling the MCP server.
 - **Stock watchdog agent** (cron, hourly): scans inventory, flags low-stock variants with velocity-based reorder suggestions.
 
-**Exit criteria:** A real customer can place and pay for a real order, get a confirmation, and the admin can fulfill it. First riyal earned. The owner receives a daily digest email and can refund/ship orders from Claude Desktop. **Playwright coverage: full cart → guest checkout → Moyasar test-card payment → order confirmation email (via Mailpit) → admin marks shipped → customer sees shipped status. Refund flow end-to-end. All in both locales on mobile viewport.**
+**Exit criteria:** A real customer can place and pay for a real order in either language, get a localized confirmation, and the admin can fulfill it. First riyal earned. The owner receives a daily digest email and can refund/ship orders from Claude Desktop. **Playwright coverage: full cart → guest checkout → Moyasar test-card payment → order confirmation email (via Mailpit, asserted per locale: Arabic email for `ar` checkout, English email for `en` checkout) → admin marks shipped → customer sees shipped status. Refund flow end-to-end. All in both locales on mobile viewport.**
 
 ---
 
-### Phase 3 — Arabic launch + bilingual AI (REAL KSA LAUNCH)
+### Phase 3 — Bilingual AI hardening + RTL polish
 
-**Goal:** The platform is genuinely KSA-native. Arabic is the primary experience, and all AI capabilities work in Arabic.
+**Goal:** Now that the platform launched bilingually in Phases 1b and 2, this phase hardens Arabic AI quality, matures the translation-management workflow, and runs a comprehensive RTL audit across everything built so far. This is polish, not launch — the launch already happened.
 
 **Work:**
-- Full Arabic translations of UI strings (translation file + simple translation management UI)
-- RTL audit and fixes across every page
-- Arabic product content entry in admin (the JSONB fields filled out; AI assists with translation from English where missing)
-- Arabic search tuning in Meilisearch (stop words, normalization of ا/أ/إ, ة/ه, ي/ى)
-- hreflang tags
-- Locale switcher component
-- Arabic transactional emails and SMS
-- Arabic typography polish (font loading; Western numerals 0–9 for prices to match banking UX in KSA)
-- **Bilingual AI:**
-  - MCP tools accept and respond in Arabic
+- Translation management UI in admin: review missing strings, accept AI-suggested translations, mark approved, see coverage per locale
+- Comprehensive RTL audit and fixes across every page built through Phase 2 (storefront + checkout + admin + emails) — visual regression snapshots locked
+- Arabic typography polish: Western numerals 0–9 for prices to match KSA banking UX, font weight pass, line-height tuning for mixed Arabic/Latin runs
+- **Bilingual AI hardening:**
+  - MCP tools accept and respond in Arabic (input language detection, response in same language)
   - Daily digest available in Arabic
-  - AI content generation produces Arabic that reads natively (not machine-translated feel) — system prompt tuned and evaluated against a held-out set of real AV product descriptions
+  - AI content generation Arabic quality tuned and evaluated against a **held-out set of real AV product descriptions** — pass threshold defined and measured
+  - System prompt tuning so Arabic output reads natively (not machine-translated feel)
+  - Eval harness checked into the repo and runnable via `pnpm eval:ar`
 
-**Exit criteria:** A monolingual Arabic speaker can discover, browse, purchase, and receive confirmations entirely in Arabic. The owner can run the store via Claude entirely in Arabic. **Playwright coverage: every existing test runs green in `ar` locale. New visual regression snapshots capture RTL layout for home, product detail, and checkout. Arabic transactional emails asserted via Mailpit.**
+**Exit criteria:** Arabic AI output passes the held-out eval set at the agreed threshold. The owner can run the store via Claude entirely in Arabic with native-feeling responses. Translation coverage UI shows ≥ 99% per locale across all UI strings. **Playwright coverage: every existing test continues to pass green in `ar` locale. Visual regression snapshots locked for RTL home, PDP, checkout, and admin. Translation management UI tested end-to-end.**
 
 ---
 
@@ -650,7 +677,7 @@ To make Phase 7's Nafath integration a drop-in rather than a refactor, Phase 0 b
 
 - **Availability:** 99.5% at launch, 99.9% once the business depends on it.
 - **Backups:** nightly full + WAL archiving; quarterly restore drill.
-- **Security:** HTTPS everywhere, HSTS, CSP, rate limiting on auth + checkout, encrypted secrets, least-privilege DB users per service.
+- **Security:** HTTPS everywhere, HSTS, CSP, rate limiting on auth + checkout, encrypted secrets, least-privilege DB users per service. **Hetzner volumes provisioned with LUKS encryption from day one. TLS required for all app↔Postgres connections (no plaintext on any network hop). Nightly `pg_dump` backups encrypted with `age` before upload to Hetzner Storage Box; the decryption key is stored separately from the backup destination.**
 - **PDPL:** consent, export, deletion, audit log for sensitive field access.
 - **Accessibility:** WCAG 2.1 AA for public storefront.
 
@@ -660,6 +687,28 @@ To make Phase 7's Nafath integration a drop-in rather than a refactor, Phase 0 b
 - **Cost ceiling:** monthly Claude API spend capped per tenant with circuit breaker; alert at 80%.
 - **Grounding:** customer bot must ground every factual claim in retrieved context; no free-form spec claims.
 - **Safety:** customer bot cannot call mutation tools beyond the authenticated user's own scope.
+
+### 6.5 Data classification & at-rest protection
+
+Every stored field falls into one of three tiers. The protection strategy follows from the tier — encryption is not applied uniformly because uniform encryption creates complexity without reducing real risk for fields the app must routinely decrypt.
+
+**Tier A — Encrypted at the column level** (pgcrypto envelope encryption). The app holds a per-tenant data-encryption key (DEK) wrapped by a key-encryption key (KEK) loaded from env at boot; the wrapped DEK lives in the DB, the KEK never does. Reads are audit-logged (see §3.7).
+- National ID numbers (when Nafath lands in Phase 7)
+- Raw identity verification payloads
+- Stored payment tokens not handled by Moyasar (rare; most card data never touches our DB)
+- Any future field carrying regulator-defined PII
+
+**Tier B — Access-controlled, not encrypted at column level.** Encryption would not help: the app must decrypt routinely to display in admin, so the keys would have to live where the app lives — meaning anyone who pops the app gets the data anyway. Protection is role-gated output schemas in the service layer (§3.7), strict tenant scoping (§3.1, §5), and RLS as defense in depth.
+- Cost prices and supplier-side pricing
+- Internal product notes / supplier notes
+- Customer PII visible to staff (email, phone, shipping address)
+- Order-level internal annotations
+
+**Tier C — Public.** No special protection beyond standard tenant scoping.
+- Product names, descriptions, retail prices, images
+- Public order status
+
+**Cross-cutting at-rest protections that apply to all tiers** (per §6.3): Hetzner LUKS volume encryption, TLS to Postgres, encrypted nightly backups with the key stored separately from the backup destination. These exist so disk theft, network snooping, and backup leaks do not bypass the tiered controls above — they are defense in depth, not a substitute for the tier-specific controls.
 
 ---
 
