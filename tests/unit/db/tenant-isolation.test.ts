@@ -30,10 +30,10 @@ const sql = postgres(DATABASE_URL, { max: 3 });
 
 beforeAll(async () => {
   await sql`
-    INSERT INTO tenants (id, slug, primary_domain, default_locale, status, name)
+    INSERT INTO tenants (id, slug, primary_domain, default_locale, status, name, sender_email)
     VALUES
-      (${tenantA}, ${`rls-a-${tenantA.slice(0, 8)}`}, ${`a-${tenantA.slice(0, 8)}.test.local`}, 'en', 'active', ${sql.json(nameA)}),
-      (${tenantB}, ${`rls-b-${tenantB.slice(0, 8)}`}, ${`b-${tenantB.slice(0, 8)}.test.local`}, 'ar', 'active', ${sql.json(nameB)})
+      (${tenantA}, ${`rls-a-${tenantA.slice(0, 8)}`}, ${`a-${tenantA.slice(0, 8)}.test.local`}, 'en', 'active', ${sql.json(nameA)}, ${`no-reply@a-${tenantA.slice(0, 8)}.test.local`}),
+      (${tenantB}, ${`rls-b-${tenantB.slice(0, 8)}`}, ${`b-${tenantB.slice(0, 8)}.test.local`}, 'ar', 'active', ${sql.json(nameB)}, ${`no-reply@b-${tenantB.slice(0, 8)}.test.local`})
   `;
   await sql`
     INSERT INTO products (tenant_id, slug, name, status)

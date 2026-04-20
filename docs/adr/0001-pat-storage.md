@@ -1,7 +1,7 @@
 # ADR 0001 — PAT storage
 
-Status: accepted (Phase 0)
-Date: 2026-04-17
+Status: accepted (Phase 0) — outcome option (b), confirmed in chunk 5
+Date: 2026-04-17 (re-dated 2026-04-20 with chunk 5 outcome)
 
 ## Context
 
@@ -57,8 +57,44 @@ plugin's extensibility:
 - **(b) Fallback if (a) is not supported by Better Auth v1:** maintain our
   own lookup path for PATs at the MCP/tRPC adapter layer; Better Auth still
   manages sessions for the web UI. Two lookup paths, one database, shared user
-  identity. This ADR is updated with (a) or (b) once chunk 7 confirms what BA
-  supports.
+  identity.
+
+**Outcome (chunk 5 — 2026-04-20): option (b).**
+
+We read `better-auth@1.6.5` source at the `bearer` plugin (`dist/plugins/bearer/index.mjs`).
+The `bearer()` plugin in BA v1 is not a PAT hasher — it is a session-cookie
+shim. Its sole job is to translate `Authorization: Bearer <token>` into the
+cookie BA's session machinery expects, by verifying the token's HMAC
+signature against `ctx.context.secret` (the server's `BETTER_AUTH_SECRET`)
+and re-serializing it as a signed session cookie. It writes nothing to
+`access_tokens`, has no hash hook we can override, and trusts only tokens
+signed with the auth secret.
+
+This does not fit our PAT model. PATs in our design are:
+  1. Tenant-scoped (BA session tokens are not).
+  2. Stored in the DB as peppered HMAC-SHA-256 (BA session tokens are not
+     stored; they are HMAC-signed in-memory).
+  3. Long-lived until rotated (BA session tokens have a TTL).
+  4. Carry our `scopes` / `role` structured metadata.
+
+So PAT verification lives in its own path: `src/server/auth/bearer-hash.ts`
+(hashing) and `src/server/auth/bearer-lookup.ts` (tenant-scoped DB lookup),
+consumed by `src/server/auth/resolve-request-identity.ts` after BA's session
+check. That module returns a discriminated union
+`{ type: 'anonymous' | 'session' | 'bearer' }` so downstream service-layer
+code never sees BA-specific types.
+
+The mount point for non-browser clients that present PATs to API routes is
+chunk 7 (MCP server); the chunk 5 deliverable is the hashing + lookup
+primitives and the `resolveRequestIdentity` seam. BA's `bearer()` plugin is
+left enabled in `src/server/auth/auth-server.ts` for a future
+mobile / RN client that wants session-JWT bearer auth — same user identity,
+different transport — but it is never the code path that authorizes an MCP
+tool call.
+
+The BA v1.6.5 source we read is at
+`node_modules/better-auth/dist/plugins/bearer/index.mjs` in this repo (pinned
+by `pnpm-lock.yaml`).
 
 ## Issuance and revocation (chunk 7)
 

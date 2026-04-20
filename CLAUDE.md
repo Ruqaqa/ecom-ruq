@@ -8,24 +8,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current repository state
 
-Phase 0 is **partially complete** — chunks 1–4 landed and were pushed to `main` at commit `c7064de` on 2026-04-19.
+Phase 0 is **partially complete** — chunks 1–5 landed to `main` on 2026-04-20. Chunks 6–9 remain.
 
-**Landed (chunks 1–4):**
+**Landed (chunks 1–5):**
 - Next.js 15 shell, TypeScript strict, Tailwind v4, ESLint flat config, Prettier. Dev server runs on port **5001** (not 3000).
 - Bilingual routing (`/en`, `/ar`) via `next-intl`, Inter + IBM Plex Sans Arabic fonts.
-- Fail-closed tenant-resolution middleware (`src/server/tenant.ts`, `src/middleware.ts`); dev fallback is opt-in via `ALLOW_TENANT_FALLBACK=1`.
+- Fail-closed **DB-backed tenant resolver** (`src/server/tenant.ts`) with 60s in-process cache, `invalidateTenantCache()` hook, and `ALLOW_TENANT_FALLBACK=1` dev override. The middleware (`src/middleware.ts`) uses `runtime: 'nodejs'` so the resolver can reach Postgres.
 - Docker Compose local stack at `compose.yml` with Postgres 16, Redis 7, Meilisearch 1.12, Mailpit — **host ports shifted to `5xxxx`** (55432 / 56379 / 57700 / 51025 / 58025) to avoid colliding with other local stacks.
-- Drizzle schema for 18 tables across `src/server/db/schema/` (Better Auth core + tenants + memberships + PATs + Nafath `identity_verifications` + `tenant_keys` + catalog + commerce + redirects + split audit). Migrations at `src/server/db/migrations/`.
-- Three Postgres roles (`app_migrator`, `app_user`, `app_tenant_lookup`) + reserved `app_platform`. RLS on every tenant-scoped table. Column-scoped `GRANT` on the resolver path.
+- Drizzle schema for 18 tables across `src/server/db/schema/` (Better Auth core + tenants with `sender_email` + memberships + PATs + Nafath `identity_verifications` + `tenant_keys` + catalog + commerce + redirects + split audit). Migrations at `src/server/db/migrations/` (0000–0005).
+- Three Postgres roles (`app_migrator`, `app_user`, `app_tenant_lookup`) + reserved `app_platform`. RLS on every tenant-scoped table. Column-scoped `GRANT` on the resolver path (extended to include `sender_email` in migration 0005).
 - `withTenant(db, ctx: AuthedTenantContext, fn)` — branded-type trust boundary, AsyncLocalStorage nested-call guard, in-tx GUC round-trip verification. See `src/server/tenant/context.ts`.
 - App-layer AES-256-GCM envelope encryption with AAD binding and format-version byte (`src/server/crypto/envelope.ts`). Boot-check loaders reject missing/short/recognizable-dev values for `DATA_KEK_BASE64`, `TOKEN_HASH_PEPPER`, `HASH_PEPPER`.
 - Split audit: `audit_log` (hash-chained, append-only, per-tenant `pg_advisory_xact_lock`, verify-not-stamp trigger raising SQLSTATE 40001) + `audit_payloads` (PDPL-deletable). RFC 8785 JCS canonicalization (`src/lib/canonical-json.ts`). `redactForAudit` Tier-A stripper. SECURITY DEFINER `pdpl_scrub_audit_payloads` stub + `REVOKE DELETE` pattern.
-- Testing harness (chunk 8 ~85%): Playwright config with iPhone 14 + Pixel 7 × `en`/`ar` mobile + Desktop Chromium secondary, Vitest with `@` alias, Lighthouse CI with mobile budgets, `@axe-core/playwright` helper, Mailpit HTTP helper, `scripts/check-e2e-coverage.ts` (route + mutation coverage lint). Hello-world E2E spec + 7 unit tests currently green (35/35).
-- ADRs at `docs/adr/` (0001 PAT storage, 0002 PDPL scrub). Runbooks at `docs/runbooks/` (`kek-rotation.md`, `audit-log.md`, `database-roles.md`). **Read these before making related changes.**
+- **Better Auth v1.6.5** with cookie sessions + `bearer` + `magic-link` plugins, Drizzle adapter (`usePlural: false`, `generateId: false` so DB `gen_random_uuid()` fills ids). Host-only cookies (`advanced.crossSubDomainCookies` undefined). Password policy: min 10 chars, breached-password v0 check via a committed top list. BA's internal rate-limiter is disabled; our own Redis sliding-window lives at `src/server/auth/rate-limit.ts`.
+- **Tenant-aware transactional email** — `src/server/email/send-tenant-email.ts` (policy function, no interface). Signature takes `Tenant`, not a Host. Nodemailer → Mailpit in dev. Host-spoof security test at `tests/unit/email/send-tenant-email-host-spoof.test.ts`.
+- **Service-layer identity seam** at `src/server/auth/resolve-request-identity.ts`: returns `{ anonymous | session | bearer }`. BA types hidden behind it. Tenant-scoped `lookupBearerToken(raw, tenantId)` at `src/server/auth/bearer-lookup.ts` — cross-tenant tokens return null (covered by `tests/unit/auth/bearer-lookup.test.ts`).
+- **Auth pages**: `/{locale}/signup`, `/{locale}/signin` (password + magic-link), `/{locale}/verify-pending`, `/{locale}/account` with signout. Button/fill gated on `hydrated` state so mobile WebKit does not race native form submit.
+- **ADR 0001 outcome: option (b)** — BA's `bearer` plugin is a session-cookie shim, not a PAT hasher. PAT verification is our own HMAC-SHA-256+pepper path at the MCP/tRPC adapter layer (chunks 6/7). See `docs/adr/0001-pat-storage.md`.
+- **Temporary audit helper** at `src/server/auth/audit-helpers.ts` — marked `TEMPORARY — delete when chunk 6 ships audit adapter`. Writes auth-event audit rows from inside BA's request path until chunk 6's tRPC/MCP audit middleware lands.
+- Dev seed: `pnpm db:seed:dev` (`scripts/seed-dev-tenant.ts`) upserts the `localhost:5001` tenant row. Playwright global-setup runs it + clears Mailpit before the suite.
+- Testing harness (chunk 8 ~90%): Playwright config with iPhone 14 + Pixel 7 × `en`/`ar` mobile + Desktop Chromium secondary, Vitest with `@` alias, Lighthouse CI with mobile budgets, `@axe-core/playwright` helper, Mailpit HTTP helper, `scripts/check-e2e-coverage.ts` (route + mutation coverage lint). **91 unit tests + 78 Playwright tests currently green.** E2E runs against the PRODUCTION build (`pnpm build && pnpm start`) not dev, because Next.js dev-mode HMR occasionally cancels in-flight test navigations on WebKit. Set `PLAYWRIGHT_USE_DEV=1` to opt back in.
+- ADRs at `docs/adr/` (0001 PAT storage, 0002 PDPL scrub). Runbooks at `docs/runbooks/` (`kek-rotation.md`, `audit-log.md`, `database-roles.md`, `auth.md`). **Read these before making related changes.**
 
-**Remaining (chunks 5–9):**
-- **Chunk 5** — Better Auth with cookie sessions + bearer-token plugin, tenant-aware transactional email (link host from tenant record, never from request `Host`). ADR `0001` already settled PAT storage as Better-Auth-extended. *Next to start.*
-- **Chunk 6** — tRPC v11 + service-layer pattern at `src/server/services/` + `createProduct` end-to-end. Tier-B output gating at the service layer. Audit wrap at the tRPC/MCP adapter layer, not per-service.
+**Remaining (chunks 6–9):**
+- **Chunk 6** — tRPC v11 + service-layer pattern at `src/server/services/` + `createProduct` end-to-end. Tier-B output gating at the service layer. Audit wrap at the tRPC/MCP adapter layer, not per-service. Also: delete `src/server/auth/audit-helpers.ts` after the adapter-level audit middleware lands; wire the Redis rate limiter into BA's `hooks.before` for sign-up/sign-in/magic-link.
 - **Chunk 7** — MCP server skeleton (`@modelcontextprotocol/sdk`), PAT issuance path (must reject client-supplied `tenantId`), `run_sql_readonly` stubbed gated.
 - **Chunk 8 remainder** — seed fixtures + tRPC-mutation regex verification once chunk 6 lands a real mutation. Then architect-audit closure of the task.
 - **Chunk 9** — GitHub Actions CI: lint → typecheck → vitest → playwright → lighthouse-ci → check-e2e-coverage, fails-closed. Coolify deploy webhook is a placeholder until Hetzner VM + Coolify exist. Security has pre-flagged: PgBouncer must be `pool_mode = transaction` or `session` (statement pooling breaks RLS).

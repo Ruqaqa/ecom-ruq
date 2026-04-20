@@ -7,6 +7,38 @@
     "switchLocale": "العربية"
   },
   "common": {
-    "appName": "ecom-ruq"
+    "appName": "ecom-ruq",
+    "email": "Email",
+    "password": "Password",
+    "continue": "Continue",
+    "cancel": "Cancel",
+    "error": "Error"
+  },
+  "auth": {
+    "signUpTitle": "Create your account",
+    "signUpHint": "Use at least 10 characters. We'll email you a verification link.",
+    "signUpSubmit": "Create account",
+    "signInTitle": "Sign in",
+    "signInHint": "Welcome back.",
+    "signInSubmit": "Sign in",
+    "haveAccount": "Have an account? Sign in",
+    "noAccount": "New here? Create an account",
+    "magicLinkTitle": "Or get a one-time sign-in link",
+    "magicLinkSubmit": "Email me a link",
+    "magicLinkSent": "Check your email for a sign-in link.",
+    "magicLinkFailed": "Could not send the link. Try again in a minute.",
+    "verifyPendingTitle": "Check your email",
+    "verifyPendingBody": "We've sent a verification link. Click it to activate your account.",
+    "verifiedTitle": "Email verified",
+    "verifiedBody": "Your email is confirmed.",
+    "accountTitle": "Your account",
+    "accountWelcome": "Welcome — your email is verified.",
+    "signOut": "Sign out",
+    "errorInvalid": "That didn't work. Check your details and try again.",
+    "errorBreached": "That password has been seen in a breach. Please choose a different one.",
+    "errorTooShort": "Password must be at least 10 characters.",
+    "errorRateLimited": "Too many attempts. Try again in a few minutes.",
+    "errorUnverified": "Please verify your email before signing in.",
+    "errorGeneric": "Something went wrong."
   }
 }

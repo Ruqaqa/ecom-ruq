@@ -32,14 +32,21 @@ const desktopProjects = desktopDeviceEntries.flatMap(({ name, device }) =>
 
 const config: PlaywrightTestConfig = {
   testDir: "tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI
     ? [["github"], ["html", { open: "never" }]]
     : [["list"], ["html", { open: "never" }]],
-  timeout: 30_000,
+  // Auth flows poll Mailpit after a network round-trip — generous ceiling.
+  timeout: 60_000,
   expect: { timeout: 5_000 },
+  // Dev-mode Next.js serializes compilation per route; too many parallel
+  // tests hammering the same dev server starve each other on first hit.
+  // A cap of 4 workers keeps the flow tight without melting the dev pipe.
+  // CI retains the same ceiling; the compile cache warms on first run.
+  workers: 4,
   use: {
     baseURL: BASE_URL,
     trace: "retain-on-failure",
@@ -48,15 +55,17 @@ const config: PlaywrightTestConfig = {
   },
   projects: [...mobileProjects, ...desktopProjects],
   webServer: {
-    command: "pnpm dev",
+    // Use the production build for e2e: Next.js dev-mode compiles routes
+    // on demand and occasionally triggers HMR page-reloads that race the
+    // test's own navigation (seen on WebKit/iPhone projects). A built
+    // server has deterministic load behaviour.
+    command: process.env.PLAYWRIGHT_USE_DEV === "1" ? "pnpm dev" : "pnpm build && pnpm start",
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     stdout: "pipe",
     stderr: "pipe",
-    timeout: 120_000,
+    timeout: 300_000,
   },
 };
-
-if (process.env.CI) config.workers = 2;
 
 export default defineConfig(config);

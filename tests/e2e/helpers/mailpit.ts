@@ -33,22 +33,28 @@ export async function clearMailpit(): Promise<void> {
   });
 }
 
-export async function waitForEmailTo(recipient: string, opts: { timeoutMs?: number } = {}): Promise<MailpitMessageBody> {
-  const deadline = Date.now() + (opts.timeoutMs ?? 15_000);
+export async function waitForEmailTo(
+  recipient: string,
+  opts: { timeoutMs?: number; subjectIncludes?: string } = {},
+): Promise<MailpitMessageBody> {
+  const deadline = Date.now() + (opts.timeoutMs ?? 30_000);
+  const subjectFilter = opts.subjectIncludes;
   return withContext(async (ctx) => {
     while (Date.now() < deadline) {
       const res = await ctx.get(`/api/v1/search?query=${encodeURIComponent(`to:${recipient}`)}`);
       if (res.ok()) {
         const data = (await res.json()) as { messages?: MailpitMessage[] };
-        const first = data.messages?.[0];
-        if (first) {
-          const detail = await ctx.get(`/api/v1/message/${first.ID}`);
+        const match = subjectFilter
+          ? data.messages?.find((m) => m.Subject.includes(subjectFilter))
+          : data.messages?.[0];
+        if (match) {
+          const detail = await ctx.get(`/api/v1/message/${match.ID}`);
           if (detail.ok()) return (await detail.json()) as MailpitMessageBody;
         }
       }
       await new Promise((r) => setTimeout(r, 250));
     }
-    throw new Error(`Timed out waiting for email to ${recipient}`);
+    throw new Error(`Timed out waiting for email to ${recipient}${subjectFilter ? ` matching '${subjectFilter}'` : ""}`);
   });
 }
 

@@ -5,17 +5,18 @@ import { resolveTenant } from "@/server/tenant";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
-export default function middleware(request: NextRequest) {
-  const tenant = resolveTenant(request.headers.get("host"));
+export default async function middleware(request: NextRequest) {
+  const tenant = await resolveTenant(request.headers.get("host"));
   if (!tenant) {
     return new NextResponse("Not Found", { status: 404 });
   }
   const response = intlMiddleware(request);
   response.headers.set("x-tenant-id", tenant.id);
-  response.headers.set("x-tenant-domain", tenant.domain);
+  response.headers.set("x-tenant-domain", tenant.primaryDomain);
   return response;
 }
 
 export const config = {
   matcher: ["/((?!api|_next|_vercel|.*\\..*).*)"],
+  runtime: "nodejs",
 };
