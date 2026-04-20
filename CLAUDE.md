@@ -8,15 +8,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current repository state
 
-This repository is currently at **Phase 0 prerequisites** per `prd.md` section 4. There is no source code, no `package.json`, no `.nvmrc`, and no test infrastructure yet. Your first session's job is to complete the prerequisites checklist in `prd.md` ("Phase 0 prerequisites — owner actions before Phase 0 can begin"), collect the owner-provided credentials and decisions, and then execute Phase 0 itself.
+Phase 0 is **partially complete** — chunks 1–4 landed and were pushed to `main` at commit `c7064de` on 2026-04-19.
 
-Do not try to run commands like `pnpm test:e2e` before Phase 0 is complete — they do not exist yet. You are going to create them.
+**Landed (chunks 1–4):**
+- Next.js 15 shell, TypeScript strict, Tailwind v4, ESLint flat config, Prettier. Dev server runs on port **5001** (not 3000).
+- Bilingual routing (`/en`, `/ar`) via `next-intl`, Inter + IBM Plex Sans Arabic fonts.
+- Fail-closed tenant-resolution middleware (`src/server/tenant.ts`, `src/middleware.ts`); dev fallback is opt-in via `ALLOW_TENANT_FALLBACK=1`.
+- Docker Compose local stack at `compose.yml` with Postgres 16, Redis 7, Meilisearch 1.12, Mailpit — **host ports shifted to `5xxxx`** (55432 / 56379 / 57700 / 51025 / 58025) to avoid colliding with other local stacks.
+- Drizzle schema for 18 tables across `src/server/db/schema/` (Better Auth core + tenants + memberships + PATs + Nafath `identity_verifications` + `tenant_keys` + catalog + commerce + redirects + split audit). Migrations at `src/server/db/migrations/`.
+- Three Postgres roles (`app_migrator`, `app_user`, `app_tenant_lookup`) + reserved `app_platform`. RLS on every tenant-scoped table. Column-scoped `GRANT` on the resolver path.
+- `withTenant(db, ctx: AuthedTenantContext, fn)` — branded-type trust boundary, AsyncLocalStorage nested-call guard, in-tx GUC round-trip verification. See `src/server/tenant/context.ts`.
+- App-layer AES-256-GCM envelope encryption with AAD binding and format-version byte (`src/server/crypto/envelope.ts`). Boot-check loaders reject missing/short/recognizable-dev values for `DATA_KEK_BASE64`, `TOKEN_HASH_PEPPER`, `HASH_PEPPER`.
+- Split audit: `audit_log` (hash-chained, append-only, per-tenant `pg_advisory_xact_lock`, verify-not-stamp trigger raising SQLSTATE 40001) + `audit_payloads` (PDPL-deletable). RFC 8785 JCS canonicalization (`src/lib/canonical-json.ts`). `redactForAudit` Tier-A stripper. SECURITY DEFINER `pdpl_scrub_audit_payloads` stub + `REVOKE DELETE` pattern.
+- Testing harness (chunk 8 ~85%): Playwright config with iPhone 14 + Pixel 7 × `en`/`ar` mobile + Desktop Chromium secondary, Vitest with `@` alias, Lighthouse CI with mobile budgets, `@axe-core/playwright` helper, Mailpit HTTP helper, `scripts/check-e2e-coverage.ts` (route + mutation coverage lint). Hello-world E2E spec + 7 unit tests currently green (35/35).
+- ADRs at `docs/adr/` (0001 PAT storage, 0002 PDPL scrub). Runbooks at `docs/runbooks/` (`kek-rotation.md`, `audit-log.md`, `database-roles.md`). **Read these before making related changes.**
+
+**Remaining (chunks 5–9):**
+- **Chunk 5** — Better Auth with cookie sessions + bearer-token plugin, tenant-aware transactional email (link host from tenant record, never from request `Host`). ADR `0001` already settled PAT storage as Better-Auth-extended. *Next to start.*
+- **Chunk 6** — tRPC v11 + service-layer pattern at `src/server/services/` + `createProduct` end-to-end. Tier-B output gating at the service layer. Audit wrap at the tRPC/MCP adapter layer, not per-service.
+- **Chunk 7** — MCP server skeleton (`@modelcontextprotocol/sdk`), PAT issuance path (must reject client-supplied `tenantId`), `run_sql_readonly` stubbed gated.
+- **Chunk 8 remainder** — seed fixtures + tRPC-mutation regex verification once chunk 6 lands a real mutation. Then architect-audit closure of the task.
+- **Chunk 9** — GitHub Actions CI: lint → typecheck → vitest → playwright → lighthouse-ci → check-e2e-coverage, fails-closed. Coolify deploy webhook is a placeholder until Hetzner VM + Coolify exist. Security has pre-flagged: PgBouncer must be `pool_mode = transaction` or `session` (statement pooling breaks RLS).
+
+**Note for deferred scope** (see `prd.md` §4 "Deferred"): `pgvector`, Voyage AI embeddings, and the customer-facing AI bot are **post-revenue**. Do not add them to remaining Phase 0 chunks. Owner admin chat ("Chat with your store", Phase 4) is NOT deferred — it uses MCP tools + `run_sql_readonly`, no embeddings.
+
+**Resume guidance.** Running `pnpm install` and `pnpm services:up` brings the local stack up; `pnpm dev` serves at `http://localhost:5001`. All commands in the table below work today. The memory index at `~/.claude/projects/-Users-bassel-development-ecom-ruq/memory/MEMORY.md` has project-specific context (ports, deferred scope, user background, team workflow lessons) — read it before starting a chunk.
 
 ---
 
 ## Essential commands
 
-These commands do not exist until Phase 0 establishes them. Afterward, they are the definition of done (see Section 1):
+All of these work today. They are the definition of done (see Section 1):
 
 | Command | Purpose |
 |---|---|
