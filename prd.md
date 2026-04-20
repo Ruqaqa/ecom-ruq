@@ -39,7 +39,7 @@ The platform is the **source of truth** for products, inventory, and orders — 
 - Gulf-native payments and shipping from day one
 - Variant-based catalog (Samsung-style: pick size, color, storage — price and stock vary per variant)
 - SEO-first architecture (SSR/ISR, structured data, hreflang, Arabic-friendly slugs)
-- **AI-native from day zero:** natural-language store management, MCP server for the owner, AI-assisted product entry, AI customer assistant, and autonomous ops agents reducing manual work toward zero.
+- **AI-native from day zero:** natural-language store management, MCP server for the owner, AI-assisted product entry, and autonomous ops agents reducing manual work toward zero. A customer-facing AI assistant is scoped for post-launch revisit — see §4 "Deferred".
 - **Client-agnostic API layer:** web today, native mobile app later, with no refactor required.
 
 ---
@@ -49,7 +49,7 @@ The platform is the **source of truth** for products, inventory, and orders — 
 ### 2.0 Runtime & repo conventions
 
 - **Package manager:** **pnpm** (locked). All scripts run via `pnpm <script>`. `npm` and `yarn` are not used.
-- **Node runtime:** **Node 20.x LTS**, pinned in `.nvmrc` and `package.json > engines`.
+- **Node runtime:** **Node 22.x LTS**, pinned in `.nvmrc` and `package.json > engines`.
 - **Repository structure:** **Single Next.js application** (not a monorepo) for Phase 0 through Phase 8. A monorepo split (pnpm workspaces + Turborepo) is deferred to "Phase 50" when a native mobile app is built — at that point the existing Next.js app becomes one workspace and the RN app a second. Until then, one `package.json`, one `tsconfig.json`, one Next.js project at the repo root.
 - **Source layout:** `src/app/` (Next.js routes), `src/server/services/` (typed service layer), `src/server/trpc/` (tRPC routers), `src/server/mcp/` (MCP server), `src/server/db/` (Drizzle schema + migrations), `src/lib/` (shared utilities), `src/i18n/` (locale catalogs), `tests/e2e/` (Playwright), `tests/unit/` (Vitest), `scripts/` (CI helpers including `check-e2e-coverage.ts`).
 - **Git workflow:** Solo → push-to-main with CI gate. No PR-based review. CI must be green before Coolify auto-deploys. Feature branches are optional and used only for work that spans multiple commits without being shippable mid-way.
@@ -65,7 +65,6 @@ The platform is the **source of truth** for products, inventory, and orders — 
 | ORM | Drizzle | SQL-first, lightweight, RLS-friendly, great TypeScript inference |
 | Schema validation | Zod | Every service function has a schema — source of truth for types, MCP tools, and API contracts |
 | Database | PostgreSQL 16 (self-hosted on Hetzner) | Mature, supports multi-tenant via RLS, JSONB for translations |
-| Vector search | **pgvector extension on Postgres** | Semantic search over products, policies, docs — no extra service |
 | Auth | Better Auth (with **bearer-token plugin** enabled) | Self-hosted, multi-tenant organizations, cookie auth for web, bearer tokens for future mobile, easy Nafath later |
 | Cache / sessions / queues | Redis (or Dragonfly) + BullMQ | Standard, well-supported |
 | Search | Meilisearch (self-hosted) | Native Arabic tokenization, typo tolerance, fast |
@@ -81,9 +80,8 @@ The platform is the **source of truth** for products, inventory, and orders — 
 |---|---|---|
 | Model provider | **Anthropic Claude API** | First-class dependency; Haiku for cheap routing/classification, Sonnet for reasoning, Opus for complex agent tasks |
 | Server SDK | `@anthropic-ai/sdk` | Streaming, tool use, prompt caching |
-| Client streaming | Vercel AI SDK (`ai`) | Streaming UI for customer chatbot with minimal boilerplate |
+| Client streaming | Vercel AI SDK (`ai`) | Streaming UI for owner admin chat ("Chat with your store") with minimal boilerplate |
 | MCP server | `@modelcontextprotocol/sdk` (TypeScript) | Exposes the platform's service layer to Claude Desktop / Claude Code / agents |
-| Embeddings | **Voyage AI** (`voyage-3` or latest multilingual model) | Better Arabic quality than OpenAI embeddings, keeps us off OpenAI as a vendor. OpenAI `text-embedding-3-small` is a fallback only if Voyage is unavailable for a specific tenant. |
 | Agent orchestration | Plain Claude tool-use loops | No LangChain — too opaque for vibe coding; direct tool loops are clearer |
 
 ### 2.3 Platform & ops
@@ -207,9 +205,7 @@ Every write operation (`createProduct`, `updateInventory`, `refundOrder`, `creat
 - A `run_sql_readonly` tool (sandboxed, row-limited, parameterized, no DDL) is available to owner-role tokens only, enabling ad-hoc natural-language analytics. Every query is logged.
 
 **Retrieval-augmented generation (RAG):**
-- `pgvector` extension enabled in Postgres from Phase 0.
-- Embedding pipeline: on write, product descriptions, categories, policies, blog posts, and FAQs are embedded and stored alongside source rows.
-- Used by: the customer chatbot (Phase 7), internal "ask your store" natural-language search, and semantic related-product recommendations.
+Deferred to post-launch (see §4 "Deferred"). Semantic search, `pgvector`, and the embeddings pipeline are not part of the core roadmap; they are revisited once revenue justifies the operational overhead. Owner-facing natural-language analytics (Phase 4 "Chat with your store") works without embeddings — it uses MCP tools and `run_sql_readonly` over structured data, not vector retrieval.
 
 **Audit log:**
 - Every service write is logged with: actor type (user/agent/system), actor ID, token ID (if any), tenant, operation, input, before state, after state, outcome, timestamp, correlation ID.
@@ -300,11 +296,10 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 | Hetzner Cloud account | VM hosting | API token with read/write |
 | GitHub account + an empty repo | Code hosting + Actions | Repo URL, a classic PAT or fine-grained PAT with repo + workflow scopes |
 | Anthropic (Claude) API key | All AI features from day zero | `ANTHROPIC_API_KEY` |
-| Voyage AI API key | Embeddings for pgvector | `VOYAGE_API_KEY` |
 | Sentry account (free tier) | Error observability | Project DSN |
 | A registered domain + DNS provider access | Custom domains per tenant | Registrar credentials or API access (Cloudflare recommended for DNS + WAF) |
 | **Two domain names chosen** for the main tenant and the sister tenant | Phase 0 wires at least one into Traefik/Coolify | The actual strings (e.g., `brand-a.com`, `brand-b.com`) |
-| A local machine with Docker, pnpm, and Node 20 LTS installed | Running the dev loop and Playwright locally | — |
+| A local machine with Docker, pnpm, and Node 22 LTS installed | Running the dev loop and Playwright locally | — |
 
 **Accounts deferred but worth starting the paperwork for (can be collected later):**
 
@@ -329,7 +324,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 **What Claude Code will do in the first Phase 0 session:**
 
 1. Read `prd.md` and `CLAUDE.md` fully.
-2. Ask the owner for the values in the tables above that are needed *right now* (Hetzner token, GitHub repo, Claude API key, Voyage key, Sentry DSN, the first domain name). Defer the rest.
+2. Ask the owner for the values in the tables above that are needed *right now* (Hetzner token, GitHub repo, Claude API key, Sentry DSN, the first domain name). Defer the rest.
 3. Store secrets in Coolify / GitHub Actions, never commit them.
 4. Halt on anything it cannot obtain, explaining exactly what is missing.
 
@@ -344,7 +339,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 *Infrastructure*
 - Hetzner Cloud VM provisioned (CCX or CPX class, Ubuntu LTS)
 - Coolify installed and configured
-- Postgres (with `pgvector`), Redis, Meilisearch running as Coolify-managed services
+- Postgres, Redis, Meilisearch running as Coolify-managed services
 - BunnyCDN storage bucket + pull zone created
 - GitHub repo + Actions → Coolify deploy webhook
 - Env management + secrets in Coolify
@@ -356,7 +351,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - Next.js 15 app scaffolded with TypeScript, Tailwind, shadcn/ui, Drizzle, Better Auth
 - **tRPC router scaffolded** with tenant-scoped context and auth guards
 - **Better Auth with bearer-token plugin enabled** (cookies for web, tokens ready for mobile)
-- Base DB schema migrated (tenants, users, sessions, access_tokens, products, variants, options, categories, orders, order_items, addresses, carts, redirects, verifications, audit_log, embeddings — all with `tenant_id` + RLS policies where applicable)
+- Base DB schema migrated (tenants, users, sessions, access_tokens, products, variants, options, categories, orders, order_items, addresses, carts, redirects, verifications, audit_log — all with `tenant_id` + RLS policies where applicable)
 - Service layer pattern established: one example service function end-to-end (`createProduct`) wired to tRPC, MCP, and audit log
 - Tenant resolution middleware (`Host` header → tenant context)
 - i18n routing middleware (`/en`, `/ar`)
@@ -366,7 +361,6 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - MCP server skeleton running (one tool live end-to-end as proof)
 - Personal access token model in Better Auth (tenant- and role-scoped)
 - Audit log middleware wrapping every service-layer write
-- Embedding pipeline stub: on `createProduct`, generate embedding and store in pgvector
 - `run_sql_readonly` tool stubbed (gated, not yet exposed)
 
 *Testing infrastructure*
@@ -395,7 +389,6 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - Admin CRUD UI for categories, products, variants, options, images — thin tRPC consumer
 - Bilingual content model wired throughout admin: every translatable field (name, description, SEO title/meta) is a JSONB `{ en, ar }` input pair; missing-translation badge surfaced per field
 - Image pipeline: upload → BunnyCDN → responsive `next/image`
-- Embeddings generated on product write for future semantic search
 
 *AI-assisted bilingual entry*
 - Admin product form has an "AI assist" panel:
@@ -573,25 +566,16 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 
 ---
 
-### Phase 7 — Customer-facing AI + growth features
+### Phase 7 — Growth features
 
-**Goal:** Features that move the needle on conversion, AOV, retention — led by the customer-facing AI assistant.
+**Goal:** Features that move the needle on conversion, AOV, retention. The customer-facing AI assistant originally scoped here has been deferred (see §4 "Deferred") — this phase ships the non-AI growth features and the AI writing-assist features that don't depend on semantic retrieval.
 
 **Work:**
 
-*Customer AI assistant*
-- Embedded chatbot on storefront (bilingual Arabic/English), streaming UI
-- RAG over product catalog (pgvector), policies, blog, FAQ, product manuals
-- Strictly scoped tools: `search_products`, `get_product`, `check_stock`, `get_my_order` (authenticated user only), `start_return`, `handoff_to_human` (WhatsApp)
-- Hard-enforced server-side scoping — cannot see other users' data, cannot mutate beyond current user's scope
-- Per-session rate limits, cost guardrails, output filtering for PII
-- System prompt forbids hallucinating product specs — model must ground every factual claim in retrieved context
-- Conversation handoff to human via WhatsApp Business link when the bot can't resolve
-
-*AI-assisted growth features*
-- AI-generated abandoned cart emails (personalized copy per recovered cart)
+*AI-assisted growth features (Claude text generation, no embeddings)*
+- AI-generated abandoned cart emails (personalized copy per recovered cart, owner review before send)
 - AI blog post drafting (SEO content marketing) with owner review
-- AI-powered cross-sell / upsell recommendations
+- Rule-based cross-sell / upsell recommendations (admin-curated "frequently bought together" mappings, plus simple category-based suggestions; semantic/vector-backed recommendations are deferred — see §4 "Deferred")
 
 *Other growth features*
 - **BNPL:** Tabby and Tamara via Moyasar or direct
@@ -604,7 +588,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - **Loyalty points** (if desired)
 - **Referral program**
 
-**Exit criteria:** Storefront chatbot answers product questions in Arabic and English, grounded in the catalog. Abandoned cart recovery emails are AI-generated and measurably lifting recovered revenue. **Playwright coverage: customer bot happy-path conversations in both locales; adversarial prompt-injection tests assert the bot refuses to reveal other users' data; BNPL checkout flow with Tabby/Tamara test mode; review submission with moderation; Nafath sandbox verification flow.**
+**Exit criteria:** Abandoned cart recovery emails are AI-generated and measurably lifting recovered revenue. BNPL checkout works end-to-end. Nafath sandbox verification is integrated. **Playwright coverage: BNPL checkout flow with Tabby/Tamara test mode; review submission with moderation; Nafath sandbox verification flow. All in both locales on mobile viewport.**
 
 ---
 
@@ -625,17 +609,44 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - Database index tuning based on real query patterns
 
 *AI safety*
-- Prompt injection red-teaming for customer bot (adversarial test set)
 - Cost monitoring and budget caps on Claude API, per agent and per tenant
-- Output filtering and PII scrubbing in AI responses
+- Output filtering and PII scrubbing in AI responses (owner-facing chat, admin responses, AI-generated content)
 - Agent behavior audit (what tools were called, with what args, with what outcomes)
 - Eval harness for AI content generation (factuality, tone, Arabic quality)
+- (Customer-bot prompt-injection red-teaming is part of the deferred customer-bot work — see §4 "Deferred")
 
 *PWA polish*
 - Add-to-home-screen manifest
 - Web push (iOS 16.4+ supported)
 - Offline catalog browsing
 - Service worker with sensible cache policy
+
+---
+
+### Deferred — revisit when revenue supports the operational cost
+
+The following capabilities were scoped out of the phased roadmap as nice-to-haves. They add real ongoing cost (Claude API spend on high-volume customer traffic, Voyage API for embeddings, eval harness upkeep, adversarial test-set maintenance) and do not block first revenue. Ship the store without them, validate that the business generates revenue, and revisit once a profit signal justifies the operational overhead.
+
+*Semantic search infrastructure*
+- `pgvector` Postgres extension enabled (one-line migration; trivial to add when needed)
+- Embedding columns on relevant tables (products, policies, FAQs, blog)
+- Voyage AI (or alternative) embeddings pipeline triggered on content writes
+- Backfill script to embed the existing catalog when turned on
+- Decision point at revisit time: pgvector + Voyage vs. stronger Meilisearch tuning alone
+
+*Customer-facing AI assistant*
+- Embedded storefront chatbot (bilingual Arabic/English), streaming UI via Vercel AI SDK
+- RAG grounded in catalog + policies + FAQ + blog (depends on the semantic-search infrastructure above, or Meilisearch-backed retrieval as a lighter alternative)
+- Strictly scoped tools: `search_products`, `get_product`, `check_stock`, `get_my_order` (authenticated user only), `start_return`, `handoff_to_human` (WhatsApp Business)
+- Hard-enforced server-side scoping — cannot see other users' data, cannot mutate beyond the current user's scope
+- Per-session, per-IP, and per-authenticated-user rate limits; cost guardrails; output filtering for PII
+- System prompt forbids hallucinating product specs — every factual claim grounded in retrieved context
+- Adversarial prompt-injection test suite
+- Full Playwright coverage of bot flows in both locales, mobile viewport
+
+**When revisiting:** the first decision is whether to ship the bot on Meilisearch-backed retrieval (faster to land, weaker multilingual semantics) or to add pgvector + Voyage first for better Arabic/English semantic retrieval. Either path is roughly a phase of work. The design rules in §6.4, §9.2, and §9.4 that reference the customer bot apply when this work is revived; they are documented now so the principles persist.
+
+**What is *not* deferred** and stays in the core roadmap: the owner admin chat ("Chat with your store", Phase 4), the MCP server and all operator tools, AI-assisted bilingual product entry (Phase 1a), AI-generated abandoned cart emails and blog drafting (Phase 7), and all autonomous ops agents (Phase 2 onward). Those use Claude text generation and MCP tool-use, not embeddings.
 
 ---
 
@@ -685,8 +696,8 @@ To make Phase 7's Nafath integration a drop-in rather than a refactor, Phase 0 b
 
 - **Latency:** owner-facing MCP calls complete in < 2s p95 for read tools.
 - **Cost ceiling:** monthly Claude API spend capped per tenant with circuit breaker; alert at 80%.
-- **Grounding:** customer bot must ground every factual claim in retrieved context; no free-form spec claims.
-- **Safety:** customer bot cannot call mutation tools beyond the authenticated user's own scope.
+- **Grounding** *(applies when customer bot is revived per §4 "Deferred")*: the customer bot must ground every factual claim in retrieved context; no free-form spec claims.
+- **Safety** *(applies when customer bot is revived per §4 "Deferred")*: the customer bot cannot call mutation tools beyond the authenticated user's own scope.
 
 ### 6.5 Data classification & at-rest protection
 
@@ -719,7 +730,7 @@ Every stored field falls into one of three tiers. The protection strategy follow
 - **B2B features:** do either tenant sell to businesses (tax-exempt, quotes, purchase orders, net-30 terms)? If yes, this is a meaningful Phase 4–5 addition.
 - **Repair / service / installation:** AV companies often offer installation. Is this in scope? Would add a service-booking module.
 - **Returns policy specifics:** KSA consumer protection law has specific rules — confirm with legal.
-- **Embeddings provider:** Voyage AI (better multilingual) vs OpenAI — decide in Phase 0 with a quick Arabic-quality A/B.
+- **Vector search at all:** deferred to post-launch (§4 "Deferred"). The revisit decision is Meilisearch-only vs. pgvector + Voyage, driven by customer-bot reactivation.
 - **PWA phase:** target Phase 8 for full PWA polish, but basic manifest + installability can arrive earlier if cheap.
 - **Native mobile app:** React Native + Expo, deferred to "much later" (Phase 50, per user). The three decisions in section 3.8 ensure no refactor is required when the time comes.
 
@@ -730,7 +741,7 @@ Every stored field falls into one of three tiers. The protection strategy follow
 - Native mobile apps — deferred. Web is mobile-first; PWA fills the gap. Architecture in section 3.8 keeps a native app as a future drop-in.
 - Marketplace model (third-party sellers)
 - Subscriptions / recurring billing
-- Live chat with humans (Phase 7 customer bot + WhatsApp handoff replaces it)
+- Live chat with humans (at launch, customers reach the owner via WhatsApp Business directly; the deferred customer bot in §4 "Deferred" will add AI-triaged handoff when revived)
 - Custom ERP integrations (we are the ERP)
 - International shipping outside Gulf
 
@@ -750,6 +761,8 @@ AI is first-class, which means its failure modes are first-class too. These cont
 - **Response caching:** identical customer queries within a short window return cached answers.
 
 ### 9.2 Prompt injection & safety (customer bot)
+
+*These rules apply when the customer bot is revived per §4 "Deferred". They are documented here so the design principles persist and do not need to be re-derived.*
 
 - Tools are **hard-scoped server-side** to the authenticated user's own data. Prompt cannot widen scope.
 - **Never trust model output as a tool argument selector alone** — always validate against the authenticated user's permissions and the tool's Zod schema.

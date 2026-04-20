@@ -1,0 +1,72 @@
+name: ecom-ruq-dev
+
+# Host-side ports are shifted into the 5xxxx range to avoid colliding with
+# other local Postgres/Redis/Meilisearch instances the dev may have running.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ecom-ruq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ecom_ruq_dev
+    ports:
+      - "55432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecom_ruq_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecom-ruq-redis
+    restart: unless-stopped
+    ports:
+      - "56379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: ecom-ruq-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: dev_master_key_change_me
+      MEILI_ENV: development
+      MEILI_NO_ANALYTICS: "true"
+    ports:
+      - "57700:7700"
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "wget --no-verbose --tries=1 --spider http://127.0.0.1:7700/health || exit 1"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: ecom-ruq-mailpit
+    restart: unless-stopped
+    ports:
+      - "51025:1025"
+      - "58025:8025"
+
+volumes:
+  pg_data:
+  redis_data:
+  meili_data:

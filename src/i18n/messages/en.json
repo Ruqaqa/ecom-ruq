@@ -1,0 +1,12 @@
+{
+  "home": {
+    "title": "ecom-ruq",
+    "tagline": "Phase 0 scaffold is alive. Bilingual routing, tenant resolution, and real content land in the next chunks.",
+    "tenantLabel": "Tenant",
+    "localeLabel": "Locale",
+    "switchLocale": "العربية"
+  },
+  "common": {
+    "appName": "ecom-ruq"
+  }
+}

@@ -47,7 +47,7 @@ No feature is considered done until the first six are green locally and in CI.
 ## 0. Runtime and repo facts (do not rediscover)
 
 - **Package manager:** pnpm. Never use `npm` or `yarn`. All scripts are `pnpm <script>`.
-- **Node:** 20.x LTS. Pinned in `.nvmrc` and `package.json > engines`. If the local machine is on a different version, stop and tell the user.
+- **Node:** 22.x LTS. Pinned in `.nvmrc` and `package.json > engines`. If the local machine is on a different version, stop and tell the user.
 - **Repo structure:** single Next.js application at the repo root, not a monorepo. One `package.json`, one `tsconfig.json`. Monorepo split is deferred to a hypothetical future React Native phase.
 - **Source layout:**
   - `src/app/` — Next.js App Router routes
@@ -198,13 +198,13 @@ For operator-facing MCP tools:
 - Every MCP call is audit-logged with actor, token ID, tool name, input, before/after state, outcome.
 - Soft-delete catalog entities (products, categories) with a recovery window. Hard delete is a separate gated operation.
 
-For customer-facing AI (Phase 7+):
+For customer-facing AI (deferred — see `prd.md` §4 "Deferred"; these rules apply when the customer bot is revived):
 
 - Tools are **hard-scoped server-side** to the authenticated user's own data. The prompt cannot widen scope.
 - The system prompt forbids inferring product specs, prices, or availability. All factual claims must be grounded in retrieved RAG context.
 - Output is filtered for PII before being returned to the client.
 - Rate limits apply per session, per IP, and per authenticated user.
-- Adversarial prompt-injection tests are part of the Phase 7 exit criteria.
+- Adversarial prompt-injection tests are part of the customer-bot revival exit criteria.
 
 ---
 
