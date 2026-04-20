@@ -218,4 +218,25 @@ for (const locale of ["en", "ar"] as const) {
     );
     expect(prevented).toBe(true);
   });
+
+  test(`interactive buttons show pointer cursor — ${locale}`, async ({ page }) => {
+    // Native <button> defaults to the arrow cursor; we override globally in
+    // globals.css. This guard prevents a silent regression where a future
+    // CSS change strips the override and buttons start feeling dead on hover.
+    // Disabled buttons intentionally keep the default cursor — that's why we
+    // fill the email first (the magic-link button disables itself when empty).
+    await page.goto(`/${locale}/signin`);
+    await waitForHydration(page, signinLabels[locale].submit);
+    await page.getByLabel(signinLabels[locale].email, { exact: true }).fill("cursor@example.com");
+
+    const submit = page.getByRole("button", { name: signinLabels[locale].submit });
+    const magic = page.getByRole("button", { name: signinLabels[locale].magic });
+    await expect(magic).toBeEnabled();
+
+    const submitCursor = await submit.evaluate((el) => getComputedStyle(el).cursor);
+    const magicCursor = await magic.evaluate((el) => getComputedStyle(el).cursor);
+
+    expect(submitCursor).toBe("pointer");
+    expect(magicCursor).toBe("pointer");
+  });
 }

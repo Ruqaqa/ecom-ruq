@@ -27,3 +27,10 @@ body {
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Native <button> defaults to the arrow cursor — override so interactive
+ * elements signal interactivity. Disabled buttons keep the default cursor. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
