@@ -36,20 +36,19 @@
  */
 import { randomUUID } from "node:crypto";
 import { middleware, publicProcedure, TRPCError } from "../init";
-import { appDb, withTenant, type Tx } from "@/server/db";
+import { appDb, type Tx } from "@/server/db";
 import {
   buildAuthedTenantContext,
   type AuthedSession,
   type AuthedTenantContext,
 } from "@/server/tenant/context";
-import { insertAuditInTx, writeAuditInOwnTx } from "@/server/audit/write";
 import {
   mapErrorToAuditCode as mapErrorToAuditCodeShared,
   inputForFailure as inputForFailureShared,
 } from "@/server/audit/adapter-wrap";
+import { runWithAudit } from "@/server/audit/run-with-audit";
 import type { TRPCContext } from "../context";
 import { deriveRole } from "../ctx-role";
-import { canonicalJson } from "@/lib/canonical-json";
 
 /**
  * Context override contributed by `auditWrap`. Downstream procedures (and
@@ -109,10 +108,6 @@ function deriveSession(ctx: Pick<TRPCContext, "identity" | "membership">): Authe
 export const mapErrorToAuditCode = mapErrorToAuditCodeShared;
 const inputForFailure = inputForFailureShared;
 
-function rawInputBytes(v: unknown): number {
-  return Buffer.byteLength(canonicalJson(v ?? null), "utf8");
-}
-
 export const auditWrap = middleware(async ({ ctx, path, type, getRawInput, next }) => {
   if (type !== "mutation") return next({ ctx: EMPTY_OVERRIDE });
   if (!appDb) {
@@ -134,63 +129,50 @@ export const auditWrap = middleware(async ({ ctx, path, type, getRawInput, next 
     capturedRawInput = undefined;
   }
 
-  try {
-    return await withTenant(appDb, authedCtx, async (tx) => {
+  // Capture the tRPC `next(...)` MiddlewareResult so we can return the
+  // original envelope (incl. `ok: true`, `ctx`, etc.) to tRPC's caller.
+  // The shared `runWithAudit` only cares about the unwrapped value +
+  // the `after` audit payload; the `ok:false` rethrow keeps the failure
+  // path identical to the pre-7.3 behavior (outer tx rolls back + a
+  // single failure audit row is written).
+  type MiddlewareResult = Awaited<ReturnType<typeof next>>;
+  let capturedResult: MiddlewareResult | null = null;
+
+  await runWithAudit<MiddlewareResult>({
+    db: appDb,
+    authedCtx,
+    tenantId: ctx.tenant.id,
+    operation: path,
+    actor,
+    correlationId,
+    successInput: capturedRawInput,
+    onFailure: (err) => ({
+      errorCode: mapErrorToAuditCode(err),
+      // Never pass capturedRawInput on the failure path. Only Zod field-
+      // paths (or nothing) reach the audit chain.
+      failureInput: inputForFailure(err),
+    }),
+    work: async (tx: Tx) => {
       const override: AuditWrapContextOverride = { tx, authedCtx, correlationId };
       const result = await next({ ctx: override });
       if (!result.ok) throw result.error;
-      await insertAuditInTx(tx, {
-        tenantId: ctx.tenant.id,
-        operation: path,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        tokenId: actor.tokenId,
-        outcome: "success",
-        correlationId,
-        input: capturedRawInput,
-        after: result.data,
-      });
-      return result;
+      capturedResult = result;
+      return { result, after: result.data };
+    },
+  });
+
+  // If runWithAudit returned normally, capturedResult is populated
+  // (the `work` thunk always sets it before returning on the success
+  // branch). Guard defensively: an unexpected path where runWithAudit
+  // returned without invoking work would indicate a broken contract
+  // in the shared core — throw rather than hand callers null.
+  if (capturedResult === null) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "auditWrap invariant broken: runWithAudit returned without work result",
     });
-  } catch (err) {
-    const code = mapErrorToAuditCode(err);
-    const failureInput = inputForFailure(err);
-    await writeAuditInOwnTx({
-      tenantId: ctx.tenant.id,
-      operation: path,
-      actorType: actor.actorType,
-      actorId: actor.actorId,
-      tokenId: actor.tokenId,
-      outcome: "failure",
-      correlationId,
-      // Never pass capturedRawInput on the failure path. Only Zod field-
-      // paths (or nothing) reach the audit chain.
-      input: failureInput,
-      errorCode: code,
-    }).catch(async (auditErr) => {
-      // writeAuditInOwnTx already captures via Sentry on its own throw,
-      // but surfacing here too is a belt-and-braces guard in case the
-      // shim ever stops swallowing.
-      const { captureMessage } = await import("@/server/obs/sentry");
-      captureMessage("audit_write_failure", {
-        level: "error",
-        tags: {
-          correlation_id: correlationId,
-          tenant_id: ctx.tenant.id,
-          operation: path,
-          actor_type: actor.actorType,
-          code,
-        },
-        extra: {
-          actor_id: actor.actorId,
-          token_id: actor.tokenId,
-          raw_input_bytes: rawInputBytes(capturedRawInput),
-          cause: String(auditErr),
-        },
-      });
-    });
-    throw err;
   }
+  return capturedResult;
 });
 
 /**

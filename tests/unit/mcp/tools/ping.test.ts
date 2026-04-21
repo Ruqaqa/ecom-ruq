@@ -51,7 +51,8 @@ describe("pingTool", () => {
     const ctx = ctxBearer("owner");
     pingTool.authorize(ctx); // no throw
     const input = PingInputSchema.parse({});
-    const raw = await pingTool.handler(ctx, input);
+    // `ping` is auditMode:"none" — dispatcher passes null for tx.
+    const raw = await pingTool.handler(ctx, input, null);
     const out = PingOutputSchema.parse(raw);
     expect(out).toEqual({ ok: true, tenantId: tenant.id, role: "owner" });
   });
@@ -60,7 +61,7 @@ describe("pingTool", () => {
     const ctx = ctxBearer("staff");
     pingTool.authorize(ctx);
     const input = PingInputSchema.parse({});
-    const raw = await pingTool.handler(ctx, input);
+    const raw = await pingTool.handler(ctx, input, null);
     expect(raw.role).toBe("staff");
   });
 

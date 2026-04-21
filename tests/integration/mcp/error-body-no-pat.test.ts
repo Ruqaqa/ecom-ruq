@@ -98,13 +98,29 @@ function toWireEnvelope(err: unknown): string {
 }
 
 describe("F-8 canary — raw err.message does not cross the MCP wire", () => {
-  it("dispatchTool re-throws the leaking error unchanged", async () => {
+  it("dispatchTool translates raw throws into McpError — raw message never escapes dispatcher (7.3 tightening)", async () => {
+    // 7.2 invariant was "dispatchTool re-throws the raw Error (but the
+    // SDK's envelope doesn't echo .message)". 7.3 tightens: dispatcher
+    // now converts any non-McpError throw into an `McpError` with
+    // safe-by-construction `.message`; the raw error is retained only
+    // as `.cause` for Sentry. Strictly stronger than the 7.2 surface.
     __setRedisForTests({ set: async () => "OK" } as never);
-    await expect(
-      dispatchTool(ctx, leakingTool, { x: 1 }, { auditMode: "none" }),
-    ).rejects.toMatchObject({
-      message: expect.stringContaining(PAT_PLAINTEXT),
-    });
+    let thrown: unknown;
+    try {
+      await dispatchTool(ctx, leakingTool, { x: 1 }, { auditMode: "none" });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(McpError);
+    const safeMsg = (thrown as McpError).message;
+    // The safe message MUST NOT embed the PAT — dispatcher mints it
+    // from the closed-set kind, not from the raw err.message.
+    expect(safeMsg).not.toContain(PAT_PLAINTEXT);
+    expect(safeMsg).not.toContain("eruq_pat_");
+    // Cause is retained for internal logs, not the wire — F-8's scope
+    // is the wire body, not Sentry. Asserting cause carries the raw
+    // error documents the separation.
+    expect(String((thrown as McpError).cause)).toContain(PAT_PLAINTEXT);
     __setRedisForTests(null);
   });
 

@@ -76,6 +76,19 @@ export function mapErrorToAuditCode(err: unknown): AuditErrorCode {
         return "rate_limited";
     }
   }
+  // Raw ZodError (tRPC wraps these into TRPCError(BAD_REQUEST) via the
+  // Zod input binding, but the MCP seam calls `inputSchema.parse()`
+  // directly and thus can surface a raw ZodError to this mapper).
+  // Duck-type on `.issues` rather than importing zod — the shared
+  // adapter-wrap module has no other zod dependency and should not
+  // acquire one just for this classification.
+  if (
+    err != null &&
+    typeof err === "object" &&
+    Array.isArray((err as { issues?: unknown }).issues)
+  ) {
+    return "validation_failed";
+  }
   const pgCode = extractPgCode(err);
   if (pgCode === "23505" || pgCode === "23503") return "conflict";
   if (pgCode === "42501") return "rls_denied";
@@ -84,7 +97,11 @@ export function mapErrorToAuditCode(err: unknown): AuditErrorCode {
 }
 
 interface ZodLike {
-  issues?: Array<{ path?: readonly (string | number)[] }>;
+  issues?: Array<{
+    path?: readonly (string | number)[];
+    /** `.strict()` issue — `code: 'unrecognized_keys'` lists the rejected keys here. */
+    keys?: readonly string[];
+  }>;
 }
 
 /**
@@ -92,16 +109,26 @@ interface ZodLike {
  * raw caller-supplied values.
  *   - Zod/validation failure: `{ kind:'validation', failedPaths:[...] }`.
  *   - anything else: `undefined` (no `input` column).
+ *
+ * For `.strict()` rejections Zod emits `{ path: [], keys: ['extra'] }`
+ * — the path is empty (it's a root-level unrecognized key). We fold
+ * the rejected keys into `failedPaths` so the MCP seam's adversarial
+ * `tenantId` attack still leaves a forensic fingerprint in the audit
+ * row ("the caller tried to set 'tenantId' on the root object").
  */
 export function inputForFailure(err: unknown): unknown {
   const zodLike = (err instanceof TRPCError && err.cause !== undefined ? err.cause : err) as ZodLike;
   const issues = zodLike.issues;
   if (Array.isArray(issues)) {
+    const fromPaths = issues
+      .map((i) => (i.path ?? []).map(String).join("."))
+      .filter((s) => s.length > 0);
+    const fromStrictKeys = issues
+      .flatMap((i) => (i.keys ?? []).map(String))
+      .filter((s) => s.length > 0);
     return {
       kind: "validation",
-      failedPaths: issues
-        .map((i) => (i.path ?? []).map(String).join("."))
-        .filter((s) => s.length > 0),
+      failedPaths: [...fromPaths, ...fromStrictKeys],
     };
   }
   return undefined;

@@ -1,41 +1,41 @@
 /**
- * MCP audit adapter — sub-chunk 7.2 Part B.
+ * MCP audit adapter — sub-chunk 7.2 Part B, refactored in 7.3 to
+ * delegate orchestration to the shared `runWithAudit` core.
  *
  * `dispatchTool(ctx, tool, rawInput, config)` is the sole orchestrator
  * that tool handlers flow through. It is responsible for:
  *   1. authorize() — throws McpError on unauthorized/forbidden.
  *   2. Zod parse of input (`.strict()` — extra keys reject).
- *   3. handler(ctx, parsedInput).
- *   4. Zod parse of output (Tier-B shape lock).
+ *   3. For mutation-mode tools: delegate to `runWithAudit` which opens
+ *      withTenant + writes the success audit row in-tx + writes a
+ *      best-effort failure audit row on throw + Sentry-captures if the
+ *      audit write itself fails. `runWithAudit` passes the opened `tx`
+ *      back to the handler so services can insert through it without
+ *      re-entering `withTenant` (which is flat-only).
+ *      For auditMode:"none" tools: invoke handler with `tx = null` and
+ *      skip withTenant entirely.
+ *   4. Zod parse of output (Tier-B shape lock via the tool's
+ *      `outputSchema.parse`).
  *   5. last_used_at debounce bump (every tool, not just mutations).
- *   6. Audit: if config.auditMode === "mutation", wrap the handler in
- *      `withTenant` + `insertAuditInTx`. Success writes an audit row;
- *      failure writes a best-effort failure audit via
- *      `writeAuditInOwnTx` with a closed-set code — NO `err.message`
- *      ever crosses into the audit row (same invariant as tRPC).
- *   7. Error re-throw: the caller (registry / transport) translates
- *      McpError → JSON-RPC code. Raw `err.message` is NOT returned on
- *      the wire (security watchout B-3 + F-8 canary).
  *
  * Operation naming: audit rows for MCP dispatches use `mcp.<tool-name>`
  * (e.g. `mcp.ping`, `mcp.create_product`). Distinct from tRPC's which
- * use the tRPC path. Consumers of the audit log can filter by prefix
- * to split transports.
+ * use the tRPC path ("products.create"). This divergence is deliberate
+ * — consumers of the audit log can filter by prefix to split transports.
  *
- * `ping` registers with `auditMode:"none"` — reads do NOT audit per
- * prd.md §3.7 ("Reads of Tier-B and Tier-C fields are not audit-
- * logged"). Mutations in 7.3+ will flip it to "mutation".
+ * Errors crossing the MCP wire: raw `err.message` is NEVER returned.
+ * McpError is the only surface; closed-set `kind` maps to JSON-RPC
+ * code via the exhaustive switch in `errors.ts` (F-8 canary).
  */
 import type { McpRequestContext } from "./context";
 import type { McpTool } from "./tools/registry";
 import { mapErrorToAuditCode, inputForFailure } from "@/server/audit/adapter-wrap";
-import {
-  appDb,
-  withTenant,
-} from "@/server/db";
+import { appDb } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
-import { insertAuditInTx, writeAuditInOwnTx } from "@/server/audit/write";
+import { runWithAudit } from "@/server/audit/run-with-audit";
+import { writeAuditInOwnTx } from "@/server/audit/write";
 import { bumpLastUsedAt, shouldWriteLastUsedAt } from "@/server/auth/last-used-debounce";
+import { McpError, auditErrorCodeToMcpKind } from "./errors";
 
 export interface ToolAuditConfig {
   auditMode: "mutation" | "none";
@@ -63,24 +63,66 @@ function operationName(tool: McpTool<unknown, unknown>): string {
   return `mcp.${tool.name}`;
 }
 
+/**
+ * Translate any caught error into an McpError so the MCP SDK emits the
+ * correct JSON-RPC code on the wire. The SDK reads `err['code']` and
+ * `err['message']` directly from the thrown value (see
+ * `shared/protocol.js` line ~394). An un-translated raw Error has no
+ * numeric `.code`, so the SDK falls back to InternalError (-32603).
+ *
+ * Preserves McpError as-is; maps everything else via the closed-set
+ * `AuditErrorCode` path. The `safeMessage` never echoes raw
+ * `err.message` (which could embed PII or a PAT via a developer's
+ * stray template string). The original error is retained as `.cause`
+ * for Sentry / internal logs only — `McpError` never surfaces cause
+ * on the wire because the SDK only reads `message` + `code`.
+ */
+function toMcpError(err: unknown): McpError {
+  if (err instanceof McpError) return err;
+  const auditCode = mapErrorToAuditCode(err);
+  const kind = auditErrorCodeToMcpKind(auditCode);
+  return new McpError(kind, kind, err);
+}
+
 export async function dispatchTool<TIn, TOut>(
   ctx: McpRequestContext,
   tool: McpTool<TIn, TOut>,
   rawInput: unknown,
   config: ToolAuditConfig,
 ): Promise<TOut> {
-  // 1-2. Authorize + parse. Failures on either throw — caught below.
   const actor = actorTuple(ctx);
   const operation = operationName(tool as McpTool<unknown, unknown>);
 
+  // Authorize + input parse live OUTSIDE runWithAudit — both failure
+  // modes (forbidden, validation_failed) should write audit rows
+  // WITHOUT opening a tenant-scoped tx. For mutation-mode tools,
+  // wrap both in a try/catch that records a failure audit row via
+  // `writeAuditInOwnTx` (its own tx). For non-mutation tools,
+  // failures propagate without audit (reads aren't audited per
+  // prd.md §3.7).
+  let parsedInput: TIn;
   try {
     tool.authorize(ctx);
-    const parsedInput = tool.inputSchema.parse(rawInput);
+    parsedInput = tool.inputSchema.parse(rawInput);
+  } catch (err) {
+    if (config.auditMode === "mutation") {
+      await writeAuditInOwnTx({
+        tenantId: ctx.tenant.id,
+        operation,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        tokenId: actor.tokenId,
+        outcome: "failure",
+        correlationId: ctx.correlationId,
+        input: inputForFailure(err),
+        errorCode: mapErrorToAuditCode(err),
+      });
+    }
+    throw toMcpError(err);
+  }
 
-    // 3-4. Delegate to the handler + output parse. Two branches based
-    // on auditMode — mutation wraps in withTenant + success audit row;
-    // none just runs.
-    let result: TOut;
+  let result: TOut;
+  try {
     if (config.auditMode === "mutation" && appDb) {
       const authedCtx = buildAuthedTenantContext(
         { id: ctx.tenant.id },
@@ -91,59 +133,45 @@ export async function dispatchTool<TIn, TOut>(
           role: ctx.identity.type === "bearer" ? ctx.identity.role : "anonymous",
         },
       );
-      result = await withTenant(appDb, authedCtx, async (tx) => {
-        const handlerResult = await tool.handler(ctx, parsedInput);
-        const parsedOutput = tool.outputSchema.parse(handlerResult);
-        await insertAuditInTx(tx, {
-          tenantId: ctx.tenant.id,
-          operation,
-          actorType: actor.actorType,
-          actorId: actor.actorId,
-          tokenId: actor.tokenId,
-          outcome: "success",
-          correlationId: ctx.correlationId,
-          input: parsedInput,
-          after: parsedOutput,
-        });
-        return parsedOutput;
-      });
-    } else {
-      const handlerResult = await tool.handler(ctx, parsedInput);
-      result = tool.outputSchema.parse(handlerResult);
-    }
-
-    // 5. last_used_at debounce — every tool dispatch, success path only.
-    // Swallows errors internally.
-    if (ctx.identity.type === "bearer") {
-      const tokenId = ctx.identity.tokenId;
-      try {
-        const should = await shouldWriteLastUsedAt(tokenId);
-        if (should) await bumpLastUsedAt(tokenId, ctx.tenant.id);
-      } catch {
-        // fail-open — debounce never gates.
-      }
-    }
-
-    return result;
-  } catch (err) {
-    // 6. Failure path — write a best-effort failure audit row when the
-    // tool was mutation-mode. Closed-set code only; never err.message.
-    if (config.auditMode === "mutation") {
-      const code = mapErrorToAuditCode(err);
-      const failureInput = inputForFailure(err);
-      await writeAuditInOwnTx({
+      result = await runWithAudit<TOut>({
+        db: appDb,
+        authedCtx,
         tenantId: ctx.tenant.id,
         operation,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        tokenId: actor.tokenId,
-        outcome: "failure",
+        actor,
         correlationId: ctx.correlationId,
-        input: failureInput,
-        errorCode: code,
+        successInput: parsedInput,
+        onFailure: (err) => ({
+          errorCode: mapErrorToAuditCode(err),
+          failureInput: inputForFailure(err),
+        }),
+        work: async (tx) => {
+          const handlerResult = await tool.handler(ctx, parsedInput, tx);
+          const parsedOutput = tool.outputSchema.parse(handlerResult);
+          return { result: parsedOutput, after: parsedOutput };
+        },
       });
+    } else {
+      const handlerResult = await tool.handler(ctx, parsedInput, null);
+      result = tool.outputSchema.parse(handlerResult);
     }
-    // 7. Re-throw — registry → transport translates to JSON-RPC.
-    throw err;
+  } catch (err) {
+    // Translate raw errors to McpError so the SDK emits the correct
+    // JSON-RPC code on the wire (see `toMcpError` docstring).
+    throw toMcpError(err);
   }
+
+  // last_used_at debounce — every tool dispatch, success path only.
+  // Swallows errors internally (fail-open; debounce never gates).
+  if (ctx.identity.type === "bearer") {
+    const tokenId = ctx.identity.tokenId;
+    try {
+      const should = await shouldWriteLastUsedAt(tokenId);
+      if (should) await bumpLastUsedAt(tokenId, ctx.tenant.id);
+    } catch {
+      // fail-open — debounce never gates.
+    }
+  }
+
+  return result;
 }

@@ -36,8 +36,10 @@ import {
 import type { ZodType } from "zod";
 import type { McpRequestContext } from "../context";
 import { McpError } from "../errors";
+import type { Tx } from "@/server/db";
 import { dispatchTool, type ToolAuditConfig } from "../audit-adapter";
 import { pingTool } from "./ping";
+import { createProductTool } from "./create-product";
 
 export interface McpTool<TInput, TOutput> {
   name: string;
@@ -46,7 +48,16 @@ export interface McpTool<TInput, TOutput> {
   outputSchema: ZodType<TOutput>;
   isVisibleFor(ctx: McpRequestContext): boolean;
   authorize(ctx: McpRequestContext): void;
-  handler(ctx: McpRequestContext, input: TInput): Promise<TOutput>;
+  /**
+   * Tool handler. `tx` is the tenant-scoped transaction opened by the
+   * shared `runWithAudit` core when the tool is registered with
+   * `auditMode:"mutation"`; it is `null` for non-mutation tools (reads
+   * like `ping`, which skip withTenant entirely). Mutation-mode
+   * handlers that receive `tx === null` should throw — `dispatchTool`
+   * surfaces this as `internal_error` via the McpError exhaustive
+   * switch, mirroring tRPC's `narrowMutationContext` invariant.
+   */
+  handler(ctx: McpRequestContext, input: TInput, tx: Tx | null): Promise<TOutput>;
 }
 
 interface RegisteredTool {
@@ -64,6 +75,10 @@ interface RegisteredTool {
 // `create_product` will register with "mutation".
 export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   { tool: pingTool as McpTool<unknown, unknown>, audit: { auditMode: "none" } },
+  {
+    tool: createProductTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
 ];
 
 export function registerTools(

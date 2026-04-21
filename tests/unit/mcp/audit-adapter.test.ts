@@ -61,7 +61,11 @@ const echoTool: McpTool<EchoInput, EchoOutput> = {
   outputSchema: z.object({ x: z.number() }),
   isVisibleFor: () => true,
   authorize: () => {},
-  handler: async (_ctx, input) => ({ x: input.x }),
+  // 7.3 extended the handler signature to `(ctx, input, tx: Tx | null)`.
+  // The third arg is null for auditMode:"none" dispatches (reads don't
+  // open withTenant). Tests that care about tx-threading assert it
+  // inside the handler via an accumulator — see the test cases below.
+  handler: async (_ctx, input, _tx) => ({ x: input.x }),
 };
 
 afterEach(() => {
@@ -121,11 +125,31 @@ describe("dispatchTool — read path (auditMode='none')", () => {
     expect(failSpy).not.toHaveBeenCalled();
   });
 
+  it("threads tx=null into the handler for auditMode='none' tools (read path never opens withTenant)", async () => {
+    // Step 3 invariant: the dispatcher's contract with McpTool.handler
+    // is `(ctx, input, tx: Tx | null)` — for auditMode:"none" tools,
+    // tx is null (withTenant is never opened; reads are not audited
+    // per prd.md §3.7). A future refactor that accidentally passed
+    // something non-null here would break the ping tool's no-DB
+    // guarantee.
+    let seenTx: unknown = "unset";
+    const sensing: McpTool<EchoInput, EchoOutput> = {
+      ...echoTool,
+      handler: async (_ctx, input, tx) => {
+        seenTx = tx;
+        return { x: input.x };
+      },
+    };
+    __setRedisForTests({ set: vi.fn(() => "OK") } as never);
+    await dispatchTool(ctxBearer(), sensing, { x: 1 }, { auditMode: "none" });
+    expect(seenTx).toBeNull();
+  });
+
   it("parses input STRICTLY — extra keys throw before the handler runs", async () => {
     const saw: Array<EchoInput> = [];
     const watching: McpTool<EchoInput, EchoOutput> = {
       ...echoTool,
-      handler: async (_ctx, input) => {
+      handler: async (_ctx, input, _tx) => {
         saw.push(input);
         return { x: input.x };
       },

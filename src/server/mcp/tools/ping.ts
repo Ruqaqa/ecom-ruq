@@ -43,7 +43,10 @@ export const pingTool: McpTool<PingInput, PingOutput> = {
       throw new McpError("unauthorized", "bearer token required");
     }
   },
-  async handler(ctx) {
+  // `tx` parameter is part of the McpTool contract — passed null for
+  // auditMode:"none" tools (reads never open withTenant). Accepted and
+  // ignored here.
+  async handler(ctx, _input, _tx) {
     if (ctx.identity.type !== "bearer") {
       // Unreachable when invoked via the normal dispatcher (authorize
       // already threw). Keeping the guard as a tripwire for a future
