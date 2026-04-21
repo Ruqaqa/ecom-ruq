@@ -139,7 +139,7 @@ async function readInputPayload(tenantId: string): Promise<unknown> {
 
 function goodInput() {
   return {
-    slug: { en: "sony-a7iv", ar: "سوني-a7iv" },
+    slug: "sony-a7iv-" + Math.random().toString(36).slice(2, 8),
     name: { en: "Sony A7 IV", ar: "سوني" },
   };
 }
@@ -205,17 +205,25 @@ describe("productsRouter.create", () => {
     });
   });
 
-  it("owner + invalid input (121-char slug.en): validation_failed + input payload is field-paths only, never raw body", async () => {
+  it("owner + invalid input (121-char slug): validation_failed + input payload is field-paths only, never raw body", async () => {
     const { appRouter } = await import("@/server/trpc/root");
     const fx = await makeTenant();
     const { userId } = await makeUserAndMembership(fx.tenantId, "owner");
     const ctx = await buildCtx({ fixture: fx, identityType: "session", userId, membershipRole: "owner" });
 
-    // Distinctive string in the oversize slug — must NOT appear anywhere in the audit payload.
-    const secret = "SECRET_SLUG_DO_NOT_LEAK_" + "a".repeat(120);
+    // Distinctive Latin-only string so the regex accepts the shape and
+    // the max(120) check is what fires — verifies field-paths-only
+    // audit on the size branch rather than on regex rejection. The
+    // string uses `"SECRET_SLUG_DO_NOT_LEAK"` as a unique prefix + 97
+    // lowercase 'a' chars = 120 chars exactly? No — "SECRET_SLUG_DO_NOT_LEAK" is 23
+    // uppercase chars which would fail the regex. Use Latin-lowercase
+    // canary and verify absence via a different sentinel pattern.
+    const sentinel = "secret-do-not-leak-canary";
+    const slug = sentinel + "-" + "a".repeat(121 - sentinel.length - 1);
+    expect(slug.length).toBe(121);
     await expect(
       appRouter.createCaller(ctx).products.create({
-        slug: { en: secret, ar: "ok" },
+        slug,
         name: { en: "ok", ar: "ok" },
       }),
     ).rejects.toThrow();
@@ -226,8 +234,8 @@ describe("productsRouter.create", () => {
 
     const payload = await readInputPayload(fx.tenantId);
     expect(payload).toMatchObject({ kind: "validation" });
-    expect(JSON.stringify(payload)).not.toContain("SECRET_SLUG_DO_NOT_LEAK");
-    expect(JSON.stringify((payload as { failedPaths: string[] }).failedPaths)).toMatch(/slug\.en/);
+    expect(JSON.stringify(payload)).not.toContain(sentinel);
+    expect(JSON.stringify((payload as { failedPaths: string[] }).failedPaths)).toMatch(/slug/);
   });
 
   it("products row carries ctx.tenant.id, not anything input-derived (wiring-preserves-invariant check)", async () => {

@@ -45,8 +45,8 @@
     "products": {
       "create": {
         "title": "New product",
-        "slugEn": "Slug (English)",
-        "slugAr": "Slug (Arabic)",
+        "slug": "Slug (URL)",
+        "slugHelper": "Lowercase Latin letters, numbers, and hyphens. Appears in the product URL.",
         "nameEn": "Name (English)",
         "nameAr": "Name (Arabic)",
         "descriptionEn": "Description (English)",

@@ -30,7 +30,7 @@
  *     tried to submit but didn't pass the schema. On sign-up that body
  *     can contain a plaintext password; we do NOT want it hashed into
  *     the chain (un-scrubbable) OR stored in audit_payloads. The field
- *     path ("slug.en") is enough forensic signal. Non-validation
+ *     path ("name.en") is enough forensic signal. Non-validation
  *     failures write no input at all; the full body, if needed, lives
  *     in Sentry `extra`, not in the chain.
  */
@@ -151,7 +151,7 @@ interface ZodLike {
 /**
  * For the failure audit row, write the minimum forensic signal — never
  * raw caller-supplied values.
- *   - Zod/validation failure: `{ kind: 'validation', failedPaths: ['slug.en', ...] }`.
+ *   - Zod/validation failure: `{ kind: 'validation', failedPaths: ['name.en', ...] }`.
  *   - anything else: `undefined` (no `input` column). Sentry `extra` carries
  *     the byte count for attack-pattern visibility; the body itself is not
  *     audit-logged.

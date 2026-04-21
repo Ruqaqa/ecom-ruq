@@ -32,7 +32,11 @@ export const products = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    slug: jsonb("slug").$type<LocalizedText>().notNull(),
+    // Latin-only URL slug (lowercase, digits, hyphens). Arabic slugs
+    // percent-encode into URL-garbage and KSA e-commerce convention
+    // uses Latin/transliterated identifiers. `name` stays bilingual
+    // for display; `slug` is URL-layer only.
+    slug: text("slug").notNull(),
     name: jsonb("name").$type<LocalizedText>().notNull(),
     description: jsonb("description").$type<LocalizedTextPartial>(),
     status: text("status").notNull().default("draft"),
@@ -48,6 +52,10 @@ export const products = pgTable(
     index("products_tenant_id_idx").on(t.tenantId),
     index("products_tenant_status_idx").on(t.tenantId, t.status),
     index("products_category_id_idx").on(t.categoryId),
+    // Unique-per-tenant — slug collisions map to pg 23505 →
+    // mapErrorToAuditCode 'conflict'. Phase 1a admin-edit-slug flow
+    // uses this as the anchor for a redirects table (prd.md §3.4).
+    uniqueIndex("products_tenant_slug_unique").on(t.tenantId, t.slug),
   ],
 );
 

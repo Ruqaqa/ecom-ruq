@@ -55,11 +55,11 @@ async function makeTenant(): Promise<string> {
 }
 
 function goodInput(): {
-  slug: { en: string; ar: string };
+  slug: string;
   name: { en: string; ar: string };
 } {
   return {
-    slug: { en: "sony-a7iv", ar: "سوني-a7iv" },
+    slug: "sony-a7iv-" + Math.random().toString(36).slice(2, 8),
     name: { en: "Sony A7 IV", ar: "سوني ايه 7 آي في" },
   };
 }
@@ -83,11 +83,13 @@ describe("createProduct — service", () => {
     );
 
     expect(result).toMatchObject({
-      slug: { en: "sony-a7iv", ar: "سوني-a7iv" },
       name: { en: "Sony A7 IV" },
       status: "draft",
       categoryId: null,
     });
+    // Slug round-trips as a plain string.
+    expect(typeof (result as { slug: unknown }).slug).toBe("string");
+    expect((result as { slug: string }).slug).toMatch(/^sony-a7iv-/);
     // Tier-B field present for owner, null because service doesn't write it.
     expect("costPriceMinor" in result).toBe(true);
     expect((result as { costPriceMinor: number | null }).costPriceMinor).toBeNull();
@@ -141,16 +143,48 @@ describe("createProduct — service", () => {
     expect(JSON.stringify(gated)).not.toContain("99999");
   });
 
-  it("Zod input rejects slug.en over per-field max (120 chars)", async () => {
+  it("Zod input rejects slug over per-field max (120 chars)", async () => {
     const { createProduct } = await import(
       "@/server/services/products/create-product"
     );
     const tenantId = await makeTenant();
     const bad = {
-      slug: { en: "a".repeat(121), ar: "x" },
+      slug: "a".repeat(121),
       name: { en: "ok", ar: "ok" },
     };
 
+    await expect(
+      withTenant(superDb, ctxFor(tenantId), async (tx) =>
+        createProduct(tx, { id: tenantId, defaultLocale: "en" }, "owner", bad),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("Zod input rejects uppercase slug (Latin-only lowercase invariant)", async () => {
+    const { createProduct } = await import(
+      "@/server/services/products/create-product"
+    );
+    const tenantId = await makeTenant();
+    const bad = {
+      slug: "Sony-A7IV",
+      name: { en: "ok", ar: "ok" },
+    };
+    await expect(
+      withTenant(superDb, ctxFor(tenantId), async (tx) =>
+        createProduct(tx, { id: tenantId, defaultLocale: "en" }, "owner", bad),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("Zod input rejects Arabic-character slug (Latin-only regex invariant)", async () => {
+    const { createProduct } = await import(
+      "@/server/services/products/create-product"
+    );
+    const tenantId = await makeTenant();
+    const bad = {
+      slug: "سوني-a7iv",
+      name: { en: "ok", ar: "ok" },
+    };
     await expect(
       withTenant(superDb, ctxFor(tenantId), async (tx) =>
         createProduct(tx, { id: tenantId, defaultLocale: "en" }, "owner", bad),

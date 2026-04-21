@@ -42,8 +42,7 @@ export function CreateProductForm({ locale }: Props) {
     setHydrated(true);
   }, []);
 
-  const [slugEn, setSlugEn] = useState("");
-  const [slugAr, setSlugAr] = useState("");
+  const [slug, setSlug] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [nameAr, setNameAr] = useState("");
   const [descriptionEn, setDescriptionEn] = useState("");
@@ -85,7 +84,7 @@ export function CreateProductForm({ locale }: Props) {
           }
         : undefined;
     mutation.mutate({
-      slug: { en: slugEn, ar: slugAr },
+      slug,
       name: { en: nameEn, ar: nameAr },
       ...(description !== undefined ? { description } : {}),
       status,
@@ -103,22 +102,15 @@ export function CreateProductForm({ locale }: Props) {
       ) : null}
 
       <FormField
-        id="product-slug-en"
-        name="slug.en"
-        label={t("slugEn")}
-        value={slugEn}
-        onChange={setSlugEn}
+        id="product-slug"
+        name="slug"
+        label={t("slug")}
+        value={slug}
+        onChange={setSlug}
         required
-        errors={fieldErrors["slug.en"] ?? fieldErrors["slug"]}
-      />
-      <FormField
-        id="product-slug-ar"
-        name="slug.ar"
-        label={t("slugAr")}
-        value={slugAr}
-        onChange={setSlugAr}
-        required
-        errors={fieldErrors["slug.ar"]}
+        pattern="[a-z0-9-]+"
+        helper={t("slugHelper")}
+        errors={fieldErrors["slug"]}
       />
       <FormField
         id="product-name-en"
@@ -189,10 +181,16 @@ interface FieldProps {
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
+  pattern?: string;
+  helper?: string;
   errors?: string[] | undefined;
 }
 
-function FormField({ id, name, label, value, onChange, required, errors }: FieldProps) {
+function FormField({ id, name, label, value, onChange, required, pattern, helper, errors }: FieldProps) {
+  const describedByIds: string[] = [];
+  if (helper) describedByIds.push(`${id}-helper`);
+  if (errors && errors.length > 0) describedByIds.push(`${id}-error`);
+  const describedBy = describedByIds.length > 0 ? describedByIds.join(" ") : undefined;
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium">
@@ -203,12 +201,18 @@ function FormField({ id, name, label, value, onChange, required, errors }: Field
         name={name}
         type="text"
         required={required}
+        pattern={pattern}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={errors && errors.length > 0 ? true : undefined}
-        aria-describedby={errors && errors.length > 0 ? `${id}-error` : undefined}
+        aria-describedby={describedBy}
         className="mt-1 block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-900"
       />
+      {helper ? (
+        <p id={`${id}-helper`} className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+          {helper}
+        </p>
+      ) : null}
       {errors && errors.length > 0 ? (
         <p id={`${id}-error`} role="alert" className="mt-1 text-sm text-red-700 dark:text-red-400">
           {errors[0]}

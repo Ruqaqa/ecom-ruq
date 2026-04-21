@@ -34,8 +34,15 @@ export interface CreateProductTenantInfo {
   defaultLocale: "en" | "ar";
 }
 
+// Latin-only URL slug: lowercase letters, digits, hyphens. Rejects
+// Arabic characters (URL-garbage via percent-encoding), uppercase
+// (breaks canonicalization), and anything else. Per-tenant uniqueness
+// enforced by pg index `products_tenant_slug_unique`; collisions map
+// to errorCode: 'conflict' via block-2 mapErrorToAuditCode.
+const SLUG_REGEX = /^[a-z0-9-]+$/;
+
 export const CreateProductInputSchema = z.object({
-  slug: localizedText({ max: 120 }),
+  slug: z.string().min(1).max(120).regex(SLUG_REGEX),
   name: localizedText({ max: 256 }),
   description: localizedTextPartial({ max: 4096 }).nullish(),
   status: z.enum(["draft", "active"]).default("draft"),
@@ -50,7 +57,7 @@ export type CreateProductInput = z.input<typeof CreateProductInputSchema>;
 
 export const ProductPublicSchema = z.object({
   id: z.string().uuid(),
-  slug: z.object({ en: z.string(), ar: z.string() }),
+  slug: z.string(),
   name: z.object({ en: z.string(), ar: z.string() }),
   description: z
     .object({ en: z.string().optional(), ar: z.string().optional() })

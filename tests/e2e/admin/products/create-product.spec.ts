@@ -5,7 +5,7 @@
  *   - happy path (owner, bilingual × iPhone14/Pixel7 × en/ar)
  *   - unauthenticated → redirect to signin (server-side admin guard)
  *   - customer → redirect to /signin?denied=admin (server-side admin guard)
- *   - Zod validation on the wire (121-char slug.en) → inline error, no DB row
+ *   - Zod validation on the wire (121-char slug) → inline error, no DB row
  *   - adapter body-size cap (>64KB POST → 413, no DB row)
  *
  * Reads `products` table directly for post-mutation assertions.
@@ -59,7 +59,7 @@ async function signIn(page: Page, locale: "en" | "ar", email: string): Promise<v
   await page.waitForURL(new RegExp(`/${locale}/account(/|\\?|$)`), { timeout: 30_000 });
 }
 
-async function readProductsForTenant(tenantDomain: string, slugEn: string): Promise<
+async function readProductsForTenant(tenantDomain: string, slug: string): Promise<
   Array<{ id: string; tenant_id: string }>
 > {
   const sql = postgres(DATABASE_URL, { max: 1 });
@@ -69,7 +69,7 @@ async function readProductsForTenant(tenantDomain: string, slugEn: string): Prom
       FROM products p
       JOIN tenants t ON t.id = p.tenant_id
       WHERE t.primary_domain = ${tenantDomain}
-        AND p.slug->>'en' = ${slugEn}
+        AND p.slug = ${slug}
     `;
   } finally {
     await sql.end({ timeout: 5 });
@@ -79,7 +79,9 @@ async function readProductsForTenant(tenantDomain: string, slugEn: string): Prom
 for (const locale of ["en", "ar"] as const) {
   test(`admin creates a product — happy path, ${locale}`, async ({ page }) => {
     test.setTimeout(45_000);
-    const slugEn = unique(`admin-${locale}`);
+    // Latin-only slug, unique-per-run so parallel projects don't
+    // collide against the `products_tenant_slug_unique` index.
+    const slug = unique(`admin-${locale}`).toLowerCase();
     await signIn(page, locale, OWNER_EMAIL);
 
     await page.goto(`/${locale}/admin/products/new`);
@@ -88,8 +90,7 @@ for (const locale of ["en", "ar"] as const) {
     await expect(submit).toBeEnabled({ timeout: 30_000 });
     await expectAxeClean(page);
 
-    await page.locator("#product-slug-en").fill(slugEn);
-    await page.locator("#product-slug-ar").fill("سوني-a7iv");
+    await page.locator("#product-slug").fill(slug);
     await page.locator("#product-name-en").fill("Sony A7 IV");
     await page.locator("#product-name-ar").fill("سوني");
     await submit.click();
@@ -101,7 +102,7 @@ for (const locale of ["en", "ar"] as const) {
     await expect(page.getByTestId("created-product-message")).toBeVisible();
 
     // Persistence + tenant-id wiring check via raw SQL.
-    const rows = await readProductsForTenant("localhost:5001", slugEn);
+    const rows = await readProductsForTenant("localhost:5001", slug);
     expect(rows.length).toBe(1);
     expect(rows[0]?.tenant_id).toBeTruthy();
 
@@ -184,15 +185,14 @@ test("owner + invalid slug (121 chars) shows inline error and creates no row", a
   const submit = page.getByRole("button", { name: expected.en.submit });
   await expect(submit).toBeEnabled({ timeout: 30_000 });
 
-  await page.locator("#product-slug-en").fill(canarySlug);
-  await page.locator("#product-slug-ar").fill("سوني");
+  await page.locator("#product-slug").fill(canarySlug);
   await page.locator("#product-name-en").fill("n");
   await page.locator("#product-name-ar").fill("ن");
   await submit.click();
 
   // Stay on the form page; inline error surfaces.
   await expect(page).toHaveURL(/\/admin\/products\/new/);
-  await expect(page.locator("#product-slug-en-error")).toBeVisible();
+  await expect(page.locator("#product-slug-error")).toBeVisible();
 
   // No row in DB.
   const rows = await readProductsForTenant("localhost:5001", canarySlug);
