@@ -40,9 +40,15 @@ describe("deriveRole", () => {
     expect(role).toBe("owner");
   });
 
-  it("returns the membership role for bearer identity + staff membership (tokenId does not influence role)", () => {
+  it("returns the bearer effectiveRole (not membership) — the S-5 short-circuit", () => {
+    // Pre-7.2 path read membership.role which caused S-5 (PAT minted as
+    // owner, user later demoted to staff, caller still resolved as owner).
+    // Post-7.2, bearer resolution carries `effectiveRole` on ctx.identity
+    // and deriveRole short-circuits there. To lock the short-circuit
+    // in place, the adversarial case below passes `membership=owner`
+    // while the PAT's `effectiveRole=staff` — role must be 'staff'.
     const role = deriveRole({
-      identity: { type: "bearer", userId: "u3", tokenId: "tok_x" },
+      identity: { type: "bearer", userId: "u3", tokenId: "tok_x", effectiveRole: "staff" },
       membership: { id: "m", role: "staff", userId: "u3", tenantId: "t" },
     });
     expect(role).toBe("staff");

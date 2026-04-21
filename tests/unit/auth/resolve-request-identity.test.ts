@@ -60,7 +60,7 @@ describe("resolveRequestIdentity", () => {
     expect(id).toEqual({ type: "session", userId: "user-1", sessionId: "sess-1" });
   });
 
-  it("returns bearer identity when the Authorization header matches a tenant-scoped PAT", async () => {
+  it("returns bearer identity when the Authorization header matches a tenant-scoped PAT (owner)", async () => {
     __setSessionProviderForTests(async () => null);
     __setBearerLookupForTests(async (token, tenantId) => {
       if (token === "eruq_pat_good" && tenantId === tenantA.id) {
@@ -82,7 +82,41 @@ describe("resolveRequestIdentity", () => {
 
     const headers = new Headers({ authorization: "Bearer eruq_pat_good" });
     const id = await resolveRequestIdentity(headers, tenantA);
-    expect(id).toEqual({ type: "bearer", userId: "user-2", tokenId: "tok-1" });
+    expect(id).toEqual({
+      type: "bearer",
+      userId: "user-2",
+      tokenId: "tok-1",
+      effectiveRole: "owner",
+    });
+  });
+
+  it("threads the lookup row's `effectiveRole` through to the bearer identity (S-5)", async () => {
+    // The PAT-lookup seam already collapsed scopes.role + membership.role
+    // to `effectiveRole`. resolveRequestIdentity must not re-compute role;
+    // it passes the lookup's answer through verbatim so deriveRole's bearer
+    // short-circuit has the right value.
+    __setSessionProviderForTests(async () => null);
+    __setBearerLookupForTests(async () => ({
+      id: "tok-staff",
+      userId: "user-demoted",
+      tenantId: tenantA.id,
+      name: "t",
+      scopes: { role: "owner" }, // minted as owner …
+      effectiveRole: "staff" as const, // … but membership demoted → staff.
+      lastUsedAt: null,
+      expiresAt: null,
+      revokedAt: null,
+      createdAt: new Date(),
+    }));
+
+    const headers = new Headers({ authorization: "Bearer eruq_pat_demoted" });
+    const id = await resolveRequestIdentity(headers, tenantA);
+    expect(id).toEqual({
+      type: "bearer",
+      userId: "user-demoted",
+      tokenId: "tok-staff",
+      effectiveRole: "staff",
+    });
   });
 
   it("CROSS-TENANT: a token scoped to tenant A is treated as anonymous on tenant B", async () => {

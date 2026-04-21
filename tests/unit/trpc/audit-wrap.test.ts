@@ -94,6 +94,8 @@ interface BuildCtxOpts {
   userId?: string;
   tokenId?: string;
   membershipRole?: "owner" | "staff" | "support";
+  /** For bearer identities: the `effectiveRole` field (S-5 / 7.2). */
+  effectiveRole?: "owner" | "staff" | "support";
 }
 
 async function buildCtx(opts: BuildCtxOpts) {
@@ -121,7 +123,12 @@ async function buildCtx(opts: BuildCtxOpts) {
       ? { type: "anonymous" as const }
       : opts.identityType === "session"
         ? { type: "session" as const, userId: opts.userId!, sessionId: "s_" + opts.userId }
-        : { type: "bearer" as const, userId: opts.userId!, tokenId: opts.tokenId! };
+        : {
+            type: "bearer" as const,
+            userId: opts.userId!,
+            tokenId: opts.tokenId!,
+            effectiveRole: opts.effectiveRole ?? opts.membershipRole ?? ("owner" as const),
+          };
 
   const membership = opts.membershipRole
     ? {
@@ -369,6 +376,62 @@ describe("audit-wrap middleware", () => {
     await expect(r.createCaller(ctx).doThing()).rejects.toThrow();
     const rows = await readAuditRows(tenantId);
     expect(lastRow(rows).error).toBe(JSON.stringify({ code: "serialization_failure" }));
+  });
+
+  it("withTenant is entered EXACTLY ONCE per success-path mutation (F-1 regression guard)", async () => {
+    // The Part-A audit-wrap refactor (sub-chunk 7.2) is meant to be
+    // byte-equivalent w.r.t. tx boundaries. If a future edit
+    // accidentally wraps the inner work in a second `withTenant` call,
+    // RLS would still pass but the per-tenant advisory-lock window
+    // would double and hash chains could race. We spy on the module-
+    // level withTenant and assert a single invocation on success.
+    const dbMod = await import("@/server/db");
+    const { router } = await import("@/server/trpc/init");
+    const { mutationProcedure } = await import("@/server/trpc/middleware/audit-wrap");
+    const tenantId = await makeTenant();
+    const ctx = await buildCtx({ tenantId, identityType: "anonymous" });
+
+    const spy = vi.spyOn(dbMod, "withTenant");
+    try {
+      const r = router({
+        doThing: mutationProcedure.mutation(() => ({ ok: true })),
+      });
+      await r.createCaller(ctx).doThing();
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("bearer caller's authedCtx.role reflects identity.effectiveRole, not membership.role (S-5)", async () => {
+    // Sub-chunk 7.2: deriveRole short-circuits on bearer identities and
+    // returns `ctx.identity.effectiveRole`. auditWrap → deriveSession →
+    // buildAuthedTenantContext must carry that same role value into
+    // ctx.authedCtx.role (which becomes the `app.role` GUC inside the tx).
+    // If membership.role shadowed the bearer effectiveRole at this seam,
+    // Tier-B output gates would happily emit owner-shape for a demoted PAT.
+    const { router } = await import("@/server/trpc/init");
+    const { mutationProcedure } = await import("@/server/trpc/middleware/audit-wrap");
+    const tenantId = await makeTenant();
+    const userId = randomUUID();
+    const ctx = await buildCtx({
+      tenantId,
+      identityType: "bearer",
+      userId,
+      tokenId: "t_" + userId,
+      membershipRole: "owner",     // DB says owner
+      effectiveRole: "staff",      // …but the PAT resolved as staff (S-5)
+    });
+
+    const captured: { role?: string } = {};
+    const r = router({
+      doThing: mutationProcedure.mutation(({ ctx }) => {
+        captured.role = ctx.authedCtx.role;
+        return { ok: true };
+      }),
+    });
+    await r.createCaller(ctx).doThing();
+    expect(captured.role).toBe("staff");
   });
 
   it("oversize raw input (>64KB serialized) is replaced with an __oversized marker before hashing", async () => {

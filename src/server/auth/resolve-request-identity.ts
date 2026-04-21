@@ -21,12 +21,21 @@
  * tests/unit/auth/resolve-request-identity.test.ts and -bearer-lookup.test.ts.
  */
 import { lookupBearerToken as realLookupBearerToken, type BearerTokenRow } from "./bearer-lookup";
+import type { MembershipRole } from "./membership";
 import type { Tenant } from "@/server/tenant";
 
+/**
+ * Bearer callers carry `effectiveRole` threaded from
+ * `BearerTokenRow.effectiveRole` (see bearer-lookup.ts). This closes the
+ * S-5 stale-membership path at the deriveRole seam: a tRPC bearer caller
+ * whose PAT was minted as owner but whose membership has since been
+ * demoted to staff resolves to 'staff', not 'owner'. Session callers
+ * still compute role off `membership.role` the usual way.
+ */
 export type RequestIdentity =
   | { type: "anonymous" }
   | { type: "session"; userId: string; sessionId: string }
-  | { type: "bearer"; userId: string; tokenId: string };
+  | { type: "bearer"; userId: string; tokenId: string; effectiveRole: MembershipRole };
 
 // Narrow shape of BA's getSession result — we only read id and userId.
 interface SessionLike {
@@ -88,7 +97,12 @@ export async function resolveRequestIdentity(
     const lookup = bearerLookupOverride ?? realLookupBearerToken;
     const row = await lookup(token, tenant.id);
     if (row) {
-      return { type: "bearer", userId: row.userId, tokenId: row.id };
+      return {
+        type: "bearer",
+        userId: row.userId,
+        tokenId: row.id,
+        effectiveRole: row.effectiveRole,
+      };
     }
   }
 

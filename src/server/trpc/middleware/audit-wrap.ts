@@ -43,7 +43,10 @@ import {
   type AuthedTenantContext,
 } from "@/server/tenant/context";
 import { insertAuditInTx, writeAuditInOwnTx } from "@/server/audit/write";
-import type { AuditErrorCode } from "@/server/audit/error-codes";
+import {
+  mapErrorToAuditCode as mapErrorToAuditCodeShared,
+  inputForFailure as inputForFailureShared,
+} from "@/server/audit/adapter-wrap";
 import type { TRPCContext } from "../context";
 import { deriveRole } from "../ctx-role";
 import { canonicalJson } from "@/lib/canonical-json";
@@ -98,77 +101,13 @@ function deriveSession(ctx: Pick<TRPCContext, "identity" | "membership">): Authe
 }
 
 /**
- * 3-level `.cause` peel to find a pg SQLSTATE buried under TRPCError (from
- * the internal-error wrap) and potentially DrizzleQueryError (from the
- * query adapter). Depth 3 covers every real pattern seen so far with
- * headroom.
+ * Re-export the transport-neutral mapper so existing importers (tests +
+ * siblings) keep working after the adapter-wrap split (sub-chunk 7.2
+ * Part A). tRPC middleware and MCP audit adapter both delegate to the
+ * same byte-equivalent mapping.
  */
-function extractPgCode(x: unknown): string | undefined {
-  // pg SQLSTATEs are 5 alphanumeric chars (e.g. '23505', '42501', '40001').
-  // We walk up to 4 .cause levels, enough to cover:
-  //   TRPCError → Drizzle-like wrapper → intermediate → pg error
-  // A TRPCError's `.code` is a named string like 'INTERNAL_SERVER_ERROR' —
-  // NOT a pg SQLSTATE — so we accept only strings matching the SQLSTATE shape.
-  const SQLSTATE = /^[A-Z0-9]{5}$/;
-  let cur: unknown = x;
-  for (let depth = 0; depth < 4 && cur != null; depth++) {
-    const code = (cur as { code?: unknown }).code;
-    if (typeof code === "string" && SQLSTATE.test(code)) return code;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
-
-/**
- * Closed-set error mapping. No fallthrough to `err.message` — internal
- * failures land as `internal_error`, full stop.
- */
-export function mapErrorToAuditCode(err: unknown): AuditErrorCode {
-  if (err instanceof TRPCError) {
-    switch (err.code) {
-      case "BAD_REQUEST":
-        return "validation_failed";
-      case "NOT_FOUND":
-        return "not_found";
-      case "UNAUTHORIZED":
-      case "FORBIDDEN":
-        return "forbidden";
-      case "TOO_MANY_REQUESTS":
-        return "rate_limited";
-    }
-  }
-  const pgCode = extractPgCode(err);
-  if (pgCode === "23505" || pgCode === "23503") return "conflict";
-  if (pgCode === "42501") return "rls_denied";
-  if (pgCode === "40001") return "serialization_failure";
-  return "internal_error";
-}
-
-interface ZodLike {
-  issues?: Array<{ path?: readonly (string | number)[] }>;
-}
-
-/**
- * For the failure audit row, write the minimum forensic signal — never
- * raw caller-supplied values.
- *   - Zod/validation failure: `{ kind: 'validation', failedPaths: ['name.en', ...] }`.
- *   - anything else: `undefined` (no `input` column). Sentry `extra` carries
- *     the byte count for attack-pattern visibility; the body itself is not
- *     audit-logged.
- */
-function inputForFailure(err: unknown): unknown {
-  const zodLike = (err instanceof TRPCError && err.cause !== undefined ? err.cause : err) as ZodLike;
-  const issues = zodLike.issues;
-  if (Array.isArray(issues)) {
-    return {
-      kind: "validation",
-      failedPaths: issues
-        .map((i) => (i.path ?? []).map(String).join("."))
-        .filter((s) => s.length > 0),
-    };
-  }
-  return undefined;
-}
+export const mapErrorToAuditCode = mapErrorToAuditCodeShared;
+const inputForFailure = inputForFailureShared;
 
 function rawInputBytes(v: unknown): number {
   return Buffer.byteLength(canonicalJson(v ?? null), "utf8");

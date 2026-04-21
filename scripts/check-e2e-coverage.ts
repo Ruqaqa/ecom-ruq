@@ -8,6 +8,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkRoleInvariants, reportViolations } from "./check-role-invariants";
 
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const APP_DIR = path.join(ROOT, "src", "app");
@@ -348,6 +349,16 @@ async function main() {
   const appDirExists = await stat(APP_DIR).then(() => true).catch(() => false);
   if (!appDirExists) {
     console.error(`Missing ${APP_DIR}`);
+    process.exit(1);
+  }
+
+  // Phase A — role-channel grep invariants (sub-chunk 7.2). Runs BEFORE
+  // the e2e-coverage phase so a role-invariant regression shows up first.
+  // No dev-escape-hatch here — `DEV_ONLY_ALLOW_MISSING_MUTATION_TESTS`
+  // only gates the e2e-coverage phase below.
+  const roleViolations = await checkRoleInvariants({ root: ROOT });
+  if (roleViolations.length > 0) {
+    reportViolations(roleViolations);
     process.exit(1);
   }
 

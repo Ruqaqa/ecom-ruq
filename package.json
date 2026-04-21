@@ -29,9 +29,11 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:install": "playwright install chromium webkit",
     "check:e2e-coverage": "tsx scripts/check-e2e-coverage.ts",
+    "check:role-invariants": "tsx scripts/check-role-invariants.ts",
     "lhci": "lhci autorun --config=./lighthouserc.cjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tanstack/react-query": "^5",
     "@trpc/client": "^11",
     "@trpc/react-query": "^11",

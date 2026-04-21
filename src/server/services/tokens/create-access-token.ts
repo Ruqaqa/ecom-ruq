@@ -74,7 +74,7 @@ export const CreateAccessTokenInputSchema = z
     ownerScopeConfirm: z.literal(true).optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.scopes.role === "owner" && data.ownerScopeConfirm !== true) {
+    if (data.scopes.role === "owner" && data.ownerScopeConfirm !== true) { // role-lint: input-scopes-role-ok
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["ownerScopeConfirm"],

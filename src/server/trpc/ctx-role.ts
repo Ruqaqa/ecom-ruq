@@ -5,7 +5,13 @@
  * shape rule #7).
  *
  * Invariants (reviewed at checkpoint 4, security re-reviews on any edit):
- *   - role comes EXCLUSIVELY from ctx.membership?.role, with the
+ *   - bearer callers carry `effectiveRole` (see resolve-request-identity);
+ *     session callers read `membership.role`. The bearer short-circuit is
+ *     the S-5 stale-membership fix — a PAT minted as owner for a now-
+ *     demoted user resolves as staff at deriveRole, not at
+ *     requireMembership (which still reads `membership.role` for the
+ *     role gate; 7.6 ships requireRole() to close that gap).
+ *   - session path: role comes from ctx.membership?.role, with the
  *     customer fallback for session-without-membership (prd.md §3.6).
  *   - anonymous identity → 'anonymous'. Customer session → 'customer'.
  *   - NEVER take a role value from request input, headers, or caller
@@ -25,6 +31,12 @@ import type { Role } from "@/server/tenant/context";
 export function deriveRole(
   ctx: Pick<TRPCContext, "identity" | "membership">,
 ): Role {
+  // Bearer short-circuit: the PAT-lookup seam already computed
+  // `min(scopes.role, membership.role)` and refuses to return at all when
+  // membership is gone. For the bearer path, `identity.effectiveRole` IS
+  // the role; we must NOT fall through to `membership.role` — that's the
+  // S-5 bug the 7.1 security review flagged.
+  if (ctx.identity.type === "bearer") return ctx.identity.effectiveRole;
   if (ctx.membership?.role) return ctx.membership.role;
   if (ctx.identity.type === "anonymous") return "anonymous";
   return "customer";

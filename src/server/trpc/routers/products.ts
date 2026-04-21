@@ -21,6 +21,12 @@
  * narrowed projection the service signature declares. role comes from
  * `deriveRole(ctx)` (see ../ctx-role.ts), NEVER from input (there is no
  * role field on CreateProductInputSchema).
+ *
+ * Role channel invariant (sub-chunk 7.2): bearer callers carry
+ * `effectiveRole` on `ctx.identity`; session callers read
+ * `membership.role`. `deriveRole` is the ONLY reader — we do NOT inline
+ * `ctx.membership?.role` here or anywhere else under routers/. The
+ * `scripts/check-role-invariants.ts` grep-lint enforces both rules in CI.
  */
 import { router, TRPCError } from "../init";
 import { mutationProcedure } from "../middleware/audit-wrap";
