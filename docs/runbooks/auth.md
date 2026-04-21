@@ -350,3 +350,13 @@ this 4x-multiplies the lock window for one user-facing event. Not a
 correctness issue (chain writes are fast; lock is per-tenant not
 global) but worth knowing if operator sees magic-link-verify latency
 spikes for a specific tenant.
+
+**Correlation topology across the four magic-link rows:**
+`auth.magic-link.consume` and `auth.session.create` share a
+`correlation_id`; `auth.signup` and `auth.verify-email` are joined by
+`actor_id + timestamp` (they don't share correlation_id because signup
+precedes session creation in a different transaction boundary).
+Querying by correlation_id reaches the consume+session pair; joining
+via actor_id reaches all four. Phase 4 MCP-query authors hitting the
+audit log via `search_audit_log` should pick the join strategy
+accordingly.
