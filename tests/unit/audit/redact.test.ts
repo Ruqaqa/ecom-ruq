@@ -126,4 +126,42 @@ describe("redactForAudit — BELT_AND_BRACES_PII_KEYS safety net", () => {
     expect(out[1]?.token).toBe("[REDACTED_SENSITIVE]");
     expect(out[0]?.id).toBe(1);
   });
+
+  // Sub-chunk 7.1 (S-7): exact-key semantics canary for PAT surfaces.
+  it("exact-key redacts `plaintext` and `tokenHash` (sub-chunk 7.1)", () => {
+    const lower = BELT_AND_BRACES_PII_KEYS.map((k) => k.toLowerCase());
+    expect(lower).toContain("plaintext");
+    expect(lower).toContain("tokenhash");
+
+    const out = redactForAudit(
+      {
+        plaintext: "eruq_pat_CANARY_DO_NOT_LEAK",
+        tokenHash: Buffer.from("deadbeef"),
+        token_hash: Buffer.from("cafebabe"),
+        ok: "keep",
+      },
+      "default",
+    ) as Record<string, unknown>;
+    expect(out.plaintext).toBe("[REDACTED_SENSITIVE]");
+    expect(out.tokenHash).toBe("[REDACTED_SENSITIVE]");
+    expect(out.token_hash).toBe("[REDACTED_SENSITIVE]");
+    expect(out.ok).toBe("keep");
+    expect(JSON.stringify(out)).not.toContain("eruq_pat_");
+  });
+
+  // Documents the MATCHER CONTRACT explicitly: exact-key only. A renamed
+  // key like `tokenPlaintext` is NOT matched. This is a contract guard,
+  // not a gap: if a future caller renames a field, they must add the
+  // new name to `BELT_AND_BRACES_PII_KEYS`. If this test starts failing,
+  // the matcher has been widened to fuzzy-match — review S-7 before
+  // shipping.
+  it("matcher is exact-key: a renamed key like `tokenPlaintext` does NOT trigger redaction", () => {
+    const out = redactForAudit(
+      { tokenPlaintext: "eruq_pat_RENAMED_CANARY" },
+      "default",
+    ) as Record<string, unknown>;
+    // Unchanged — documenting the matcher semantics, not endorsing the
+    // behavior.
+    expect(out.tokenPlaintext).toBe("eruq_pat_RENAMED_CANARY");
+  });
 });

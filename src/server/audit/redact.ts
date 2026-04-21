@@ -75,6 +75,14 @@ export const BELT_AND_BRACES_PII_KEYS: readonly string[] = Object.freeze([
   "nationalId",
   "national_id",
   "nafath",
+  // PAT issuance (sub-chunk 7.1): `createAccessToken` returns a
+  // `plaintext` once, and the DB stores `tokenHash` (bytea). Exact-key
+  // match on both short-circuits any accidental `after: { ..., plaintext }`
+  // or `input: { tokenHash: buf }` from landing in the append-only
+  // audit chain.
+  "plaintext",
+  "tokenHash",
+  "token_hash",
 ]);
 
 const PII_KEY_SET: ReadonlySet<string> = new Set(

@@ -6,9 +6,11 @@
  */
 import { router } from "./init";
 import { productsRouter } from "./routers/products";
+import { tokensRouter } from "./routers/tokens";
 
 export const appRouter = router({
   products: productsRouter,
+  tokens: tokensRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -64,6 +64,20 @@ beforeAll(async () => {
     VALUES (${userId}, ${`bearer-${userId.slice(0, 8)}@example.com`}, true)
   `;
 
+  // Sub-chunk 7.1 (S-5) — lookup now INNER JOINs memberships. The test
+  // user needs a membership row per tenant so the existing assertions
+  // (happy-path, revoked, expired) still return a row; the cross-tenant
+  // test still gets null because tenantB filter + tenantA predicate
+  // never agree.
+  await setupSql`
+    INSERT INTO memberships (id, tenant_id, user_id, role)
+    VALUES (${randomUUID()}, ${tenantA}, ${userId}, 'owner')
+  `;
+  await setupSql`
+    INSERT INTO memberships (id, tenant_id, user_id, role)
+    VALUES (${randomUUID()}, ${tenantB}, ${userId}, 'staff')
+  `;
+
   const hashA = hashBearerToken(tokenA);
   const hashB = hashBearerToken(tokenB);
 
@@ -130,5 +144,67 @@ describe("lookupBearerToken", () => {
     await setupSql`UPDATE access_tokens SET expires_at = now() - interval '1 minute' WHERE id = ${tokenARowId}`;
     const row = await lookupBearerToken(tokenA, tenantA);
     expect(row).toBeNull();
+  });
+
+  // S-5 stale-membership fix — PAT must not outlive its bearing membership.
+  it("S-5: returns null when the bearing user's membership has been revoked", async () => {
+    // Delete the tenantA membership; tenantB membership untouched.
+    await setupSql`DELETE FROM memberships WHERE user_id = ${userId} AND tenant_id = ${tenantA}`;
+    try {
+      const row = await lookupBearerToken(tokenA, tenantA);
+      expect(row).toBeNull();
+    } finally {
+      await setupSql`INSERT INTO memberships (id, tenant_id, user_id, role) VALUES (${randomUUID()}, ${tenantA}, ${userId}, 'owner')`;
+    }
+  });
+
+  it("S-5: demoted membership collapses effectiveRole to min(scopes.role, membership.role)", async () => {
+    // token A was minted with scopes.role='owner'; demote the membership
+    // to 'staff' and expect effectiveRole='staff'.
+    await setupSql`UPDATE memberships SET role = 'staff' WHERE user_id = ${userId} AND tenant_id = ${tenantA}`;
+    try {
+      const row = await lookupBearerToken(tokenA, tenantA);
+      expect(row).not.toBeNull();
+      expect(row?.effectiveRole).toBe("staff");
+    } finally {
+      await setupSql`UPDATE memberships SET role = 'owner' WHERE user_id = ${userId} AND tenant_id = ${tenantA}`;
+    }
+  });
+
+  it("S-5: when scopes.role is tighter than membership.role, effectiveRole is the tighter scope", async () => {
+    // token B was minted with scopes.role='staff' under a 'staff'
+    // membership — if we promote the user to 'owner' at tenantB, the
+    // PAT still resolves as staff (scopes.role bounds effectiveRole from
+    // ABOVE: min(staff, owner) = staff).
+    await setupSql`UPDATE memberships SET role = 'owner' WHERE user_id = ${userId} AND tenant_id = ${tenantB}`;
+    try {
+      const row = await lookupBearerToken(tokenB, tenantB);
+      expect(row?.effectiveRole).toBe("staff");
+    } finally {
+      await setupSql`UPDATE memberships SET role = 'staff' WHERE user_id = ${userId} AND tenant_id = ${tenantB}`;
+    }
+  });
+
+  // S-9 dual-pepper rotation — a token hashed under the PREVIOUS pepper
+  // still resolves after the current pepper rotates to a new value.
+  it("S-9: token hashed under previous pepper still resolves when current pepper is rotated", async () => {
+    const env = process.env as Record<string, string | undefined>;
+    const originalCurrent = env.TOKEN_HASH_PEPPER;
+
+    // The existing tokenA row was hashed under the CURRENT pepper at seed
+    // time. Rotate: move current → previous, install a NEW current. The
+    // lookup must still find tokenA because hashBearerTokenAllPeppers
+    // returns both hashes.
+    env.TOKEN_HASH_PEPPER_PREVIOUS = originalCurrent;
+    env.TOKEN_HASH_PEPPER = randomBytes(32).toString("base64");
+
+    try {
+      const row = await lookupBearerToken(tokenA, tenantA);
+      expect(row).not.toBeNull();
+      expect(row?.id).toBe(tokenARowId);
+    } finally {
+      env.TOKEN_HASH_PEPPER = originalCurrent;
+      delete env.TOKEN_HASH_PEPPER_PREVIOUS;
+    }
   });
 });

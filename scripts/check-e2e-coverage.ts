@@ -313,6 +313,37 @@ async function checkNoPublicMutations(): Promise<string[]> {
   return violations;
 }
 
+/**
+ * S-10 (sub-chunk 7.1): forbid raw hard-deletes on `access_tokens`.
+ * The ONLY supported disposal path for a PAT is soft-revoke
+ * (`UPDATE revoked_at = now()`), which is what `revokeAccessToken`
+ * does. A hard-delete would skip audit wrap, skip the RLS policy
+ * WITH-CHECK, and leave a dangling audit-log hash chain with no
+ * matching row. The PDPL scrub path (`pdpl_scrub_audit_payloads` —
+ * see migrations/0004) is a SECURITY DEFINER fn, not a call into
+ * `accessTokens` directly.
+ *
+ * The lint is a non-comment regex match against every .ts file under
+ * `src/` looking for `.delete(accessTokens)`. No exemption file today;
+ * if a legitimate cascade path emerges, add a BYPASS_DELETE_ACCESSTOKENS
+ * marker and update this comment.
+ */
+async function checkNoRawAccessTokenDeletes(): Promise<string[]> {
+  const files = (await walk(SRC_DIR)).filter((f) => /\.(ts|tsx)$/.test(f));
+  const violations: string[] = [];
+  for (const file of files) {
+    const src = await readFile(file, "utf8");
+    for (const line of src.split("\n")) {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+      if (/\.delete\s*\(\s*accessTokens\s*\)/.test(line)) {
+        violations.push(`${file}: ${line.trim()}`);
+      }
+    }
+  }
+  return violations;
+}
+
 async function main() {
   const appDirExists = await stat(APP_DIR).then(() => true).catch(() => false);
   if (!appDirExists) {
@@ -334,12 +365,13 @@ async function main() {
     process.exit(2);
   }
 
-  const [routes, mutations, haystack, publicMutationViolations, authAfterViolations] = await Promise.all([
+  const [routes, mutations, haystack, publicMutationViolations, authAfterViolations, rawDeleteViolations] = await Promise.all([
     collectRoutes(),
     collectTrpcMutations(),
     loadAllE2ESources(),
     checkNoPublicMutations(),
     checkAuthAuditAfterShape(),
+    checkNoRawAccessTokenDeletes(),
   ]);
 
   if (authAfterViolations.length > 0) {
@@ -353,6 +385,14 @@ async function main() {
   if (publicMutationViolations.length > 0) {
     console.error("publicProcedure.mutation(...) bypasses audit wrap. Use mutationProcedure:");
     for (const v of publicMutationViolations) console.error(`  ${v}`);
+    process.exit(1);
+  }
+
+  if (rawDeleteViolations.length > 0) {
+    console.error(
+      "Raw .delete(accessTokens) is forbidden. Use soft-revoke via revokeAccessToken service (sub-chunk 7.1 S-10):",
+    );
+    for (const v of rawDeleteViolations) console.error(`  ${v}`);
     process.exit(1);
   }
 
