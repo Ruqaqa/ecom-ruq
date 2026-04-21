@@ -26,6 +26,14 @@
 import { z } from "zod";
 import { products } from "@/server/db/schema/catalog";
 import { localizedText, localizedTextPartial } from "@/lib/i18n/localized";
+// Latin-only URL slug. Regex + length + leading/trailing/consecutive-
+// hyphen invariants all live in the shared `@/lib/product-slug`
+// module — same module the admin form imports for live validation.
+// Single source of truth; client and server cannot drift. Per-tenant
+// uniqueness is enforced by pg index `products_tenant_slug_unique`;
+// collisions map to errorCode: 'conflict' via block-2
+// mapErrorToAuditCode.
+import { SLUG_REGEX, SLUG_MAX, validateSlug } from "@/lib/product-slug";
 import type { Tx } from "@/server/db";
 import type { Role } from "@/server/tenant/context";
 
@@ -34,15 +42,15 @@ export interface CreateProductTenantInfo {
   defaultLocale: "en" | "ar";
 }
 
-// Latin-only URL slug: lowercase letters, digits, hyphens. Rejects
-// Arabic characters (URL-garbage via percent-encoding), uppercase
-// (breaks canonicalization), and anything else. Per-tenant uniqueness
-// enforced by pg index `products_tenant_slug_unique`; collisions map
-// to errorCode: 'conflict' via block-2 mapErrorToAuditCode.
-const SLUG_REGEX = /^[a-z0-9-]+$/;
-
 export const CreateProductInputSchema = z.object({
-  slug: z.string().min(1).max(120).regex(SLUG_REGEX),
+  slug: z
+    .string()
+    .min(1)
+    .max(SLUG_MAX)
+    .regex(SLUG_REGEX)
+    .refine((s) => validateSlug(s) === null, {
+      message: "slug: invalid shape (leading/trailing/consecutive hyphen)",
+    }),
   name: localizedText({ max: 256 }),
   description: localizedTextPartial({ max: 4096 }).nullish(),
   status: z.enum(["draft", "active"]).default("draft"),

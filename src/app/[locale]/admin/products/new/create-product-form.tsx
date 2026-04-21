@@ -27,6 +27,12 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import type { Locale } from "@/i18n/routing";
 import { trpc } from "@/lib/trpc/client";
+import {
+  SLUG_MAX,
+  slugify,
+  validateSlug,
+  type SlugValidationError,
+} from "@/lib/product-slug";
 
 interface Props {
   locale: Locale;
@@ -43,6 +49,12 @@ export function CreateProductForm({ locale }: Props) {
   }, []);
 
   const [slug, setSlug] = useState("");
+  // `slugDirty` flips true the moment the user edits the slug input
+  // manually. While false, changes to name.en re-derive the slug via
+  // `slugify`; after the user has touched the field, we stop auto-
+  // writing to preserve their edit. The sync button resets dirty.
+  const [slugDirty, setSlugDirty] = useState(false);
+  const [slugError, setSlugError] = useState<SlugValidationError | null>(null);
   const [nameEn, setNameEn] = useState("");
   const [nameAr, setNameAr] = useState("");
   const [descriptionEn, setDescriptionEn] = useState("");
@@ -50,6 +62,28 @@ export function CreateProductForm({ locale }: Props) {
   const [status, setStatus] = useState<"draft" | "active">("draft");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [topError, setTopError] = useState<string | null>(null);
+
+  function onNameEnChange(next: string): void {
+    setNameEn(next);
+    if (!slugDirty) {
+      const derived = slugify(next);
+      setSlug(derived);
+      setSlugError(derived.length === 0 ? null : validateSlug(derived));
+    }
+  }
+
+  function onSlugChange(next: string): void {
+    setSlug(next);
+    setSlugDirty(true);
+    setSlugError(next.length === 0 ? null : validateSlug(next));
+  }
+
+  function onSyncFromName(): void {
+    const derived = slugify(nameEn);
+    setSlug(derived);
+    setSlugDirty(false);
+    setSlugError(derived.length === 0 ? null : validateSlug(derived));
+  }
 
   const mutation = trpc.products.create.useMutation({
     onSuccess: (data) => {
@@ -101,23 +135,32 @@ export function CreateProductForm({ locale }: Props) {
         </p>
       ) : null}
 
-      <FormField
-        id="product-slug"
-        name="slug"
-        label={t("slug")}
-        value={slug}
-        onChange={setSlug}
-        required
-        pattern="[a-z0-9-]+"
-        helper={t("slugHelper")}
-        errors={fieldErrors["slug"]}
+      <SlugField
+        slug={slug}
+        liveError={slugError}
+        serverErrors={fieldErrors["slug"]}
+        onSlugChange={onSlugChange}
+        onSyncFromName={onSyncFromName}
+        labels={{
+          label: t("slug"),
+          helper: t("slugHelper"),
+          syncAriaLabel: t("slugSyncAriaLabel"),
+          errorMessages: {
+            empty: t("slugError.empty"),
+            too_long: t("slugError.too_long"),
+            invalid_chars: t("slugError.invalid_chars"),
+            leading_hyphen: t("slugError.leading_hyphen"),
+            trailing_hyphen: t("slugError.trailing_hyphen"),
+            consecutive_hyphens: t("slugError.consecutive_hyphens"),
+          },
+        }}
       />
       <FormField
         id="product-name-en"
         name="name.en"
         label={t("nameEn")}
         value={nameEn}
-        onChange={setNameEn}
+        onChange={onNameEnChange}
         required
         errors={fieldErrors["name.en"] ?? fieldErrors["name"]}
       />
@@ -241,6 +284,83 @@ function FormTextarea({ id, name, label, value, onChange, errors }: FieldProps) 
       {errors && errors.length > 0 ? (
         <p id={`${id}-error`} role="alert" className="mt-1 text-sm text-red-700 dark:text-red-400">
           {errors[0]}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+interface SlugFieldProps {
+  slug: string;
+  liveError: SlugValidationError | null;
+  serverErrors: string[] | undefined;
+  onSlugChange: (v: string) => void;
+  onSyncFromName: () => void;
+  labels: {
+    label: string;
+    helper: string;
+    syncAriaLabel: string;
+    errorMessages: Record<SlugValidationError, string>;
+  };
+}
+
+/**
+ * Slug input composition: text input + sync-from-name button (↻), plus
+ * live shape validation via `validateSlug`. Server Zod remains
+ * authoritative — any validation that gets past live checks is
+ * re-validated server-side and surfaces via `serverErrors`. Live
+ * error takes precedence over server error while the user types.
+ */
+function SlugField({
+  slug,
+  liveError,
+  serverErrors,
+  onSlugChange,
+  onSyncFromName,
+  labels,
+}: SlugFieldProps) {
+  const liveMessage = liveError ? labels.errorMessages[liveError] : null;
+  const serverMessage = serverErrors && serverErrors.length > 0 ? serverErrors[0] : null;
+  const displayedError = liveMessage ?? serverMessage;
+
+  const describedBy: string[] = ["product-slug-helper"];
+  if (displayedError) describedBy.push("product-slug-error");
+
+  return (
+    <div>
+      <label htmlFor="product-slug" className="block text-sm font-medium">
+        {labels.label}
+      </label>
+      <div className="mt-1 flex items-start gap-2">
+        <input
+          id="product-slug"
+          name="slug"
+          type="text"
+          required
+          value={slug}
+          onChange={(e) => onSlugChange(e.target.value)}
+          pattern="[a-z0-9-]+"
+          maxLength={SLUG_MAX}
+          aria-invalid={displayedError ? true : undefined}
+          aria-describedby={describedBy.join(" ")}
+          className="block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-900"
+        />
+        <button
+          type="button"
+          onClick={onSyncFromName}
+          aria-label={labels.syncAriaLabel}
+          title={labels.syncAriaLabel}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-neutral-300 bg-white text-base dark:border-neutral-700 dark:bg-neutral-900"
+        >
+          ↻
+        </button>
+      </div>
+      <p id="product-slug-helper" className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+        {labels.helper}
+      </p>
+      {displayedError ? (
+        <p id="product-slug-error" role="alert" className="mt-1 text-sm text-red-700 dark:text-red-400">
+          {displayedError}
         </p>
       ) : null}
     </div>

@@ -214,6 +214,45 @@ test("owner + invalid slug (121 chars) shows inline error and creates no row", a
   expect(dump).not.toContain("SECRET_SLUG_DO_NOT_LEAK_E2E");
 });
 
+for (const locale of ["en", "ar"] as const) {
+  test(`slug auto-derives from name, supports manual override, sync button re-derives — ${locale}`, async ({ page }) => {
+    test.setTimeout(45_000);
+    await signIn(page, locale, OWNER_EMAIL);
+
+    await page.goto(`/${locale}/admin/products/new`);
+    const submit = page.getByRole("button", { name: expected[locale].submit });
+    await expect(submit).toBeEnabled({ timeout: 30_000 });
+
+    const slugInput = page.locator("#product-slug");
+    const nameEnInput = page.locator("#product-name-en");
+    const syncButton = page.getByRole("button", { name: /Regenerate slug from name|إعادة توليد الرابط من الاسم/ });
+
+    // 1. Auto-derive on name.en input (slug not yet manually touched).
+    await nameEnInput.fill("Sony A7 IV Camera");
+    await expect(slugInput).toHaveValue("sony-a7-iv-camera");
+
+    // 2. Manual override sticks.
+    await slugInput.fill("custom-manual-slug");
+    await expect(slugInput).toHaveValue("custom-manual-slug");
+
+    // 3. Changing name.en after a manual override does NOT overwrite.
+    await nameEnInput.fill("Updated Product Name");
+    await expect(slugInput).toHaveValue("custom-manual-slug");
+
+    // 4. Sync button re-derives from current name.en + resets dirty.
+    await syncButton.click();
+    await expect(slugInput).toHaveValue("updated-product-name");
+
+    // 5. Mobile touch target: sync button ≥44px high (CLAUDE.md §6.2).
+    const boxSize = await syncButton.boundingBox();
+    expect(boxSize?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(boxSize?.width ?? 0).toBeGreaterThanOrEqual(44);
+
+    // Axe after the full UX interaction.
+    await expectAxeClean(page);
+  });
+}
+
 test("tRPC POST body >64KB is rejected with 413 at the adapter", async ({ request }) => {
   const huge = "a".repeat(128 * 1024);
   const res = await request.post("/api/trpc/products.create", {

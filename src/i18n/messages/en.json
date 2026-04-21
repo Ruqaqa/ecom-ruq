@@ -47,6 +47,15 @@
         "title": "New product",
         "slug": "Slug (URL)",
         "slugHelper": "Lowercase Latin letters, numbers, and hyphens. Appears in the product URL.",
+        "slugSyncAriaLabel": "Regenerate slug from name",
+        "slugError": {
+          "empty": "Slug is required.",
+          "too_long": "Slug must be 120 characters or fewer.",
+          "invalid_chars": "Slug can only contain lowercase letters, numbers, and hyphens.",
+          "leading_hyphen": "Slug cannot start with a hyphen.",
+          "trailing_hyphen": "Slug cannot end with a hyphen.",
+          "consecutive_hyphens": "Slug cannot contain two hyphens in a row."
+        },
         "nameEn": "Name (English)",
         "nameAr": "Name (Arabic)",
         "descriptionEn": "Description (English)",
