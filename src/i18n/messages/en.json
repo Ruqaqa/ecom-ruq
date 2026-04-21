@@ -40,5 +40,30 @@
     "errorRateLimited": "Too many attempts. Try again in a few minutes.",
     "errorUnverified": "Please verify your email before signing in.",
     "errorGeneric": "Something went wrong."
+  },
+  "admin": {
+    "products": {
+      "create": {
+        "title": "New product",
+        "slugEn": "Slug (English)",
+        "slugAr": "Slug (Arabic)",
+        "nameEn": "Name (English)",
+        "nameAr": "Name (Arabic)",
+        "descriptionEn": "Description (English)",
+        "descriptionAr": "Description (Arabic)",
+        "status": "Status",
+        "statusDraft": "Draft",
+        "statusActive": "Active",
+        "submit": "Create product",
+        "forbidden": "You don't have permission to create products.",
+        "error": "Could not create the product. Please check your inputs.",
+        "validationTooLong": "Too long — try a shorter value.",
+        "validationRequired": "This field is required."
+      },
+      "list": {
+        "title": "Products",
+        "createdMessage": "Created: {id}"
+      }
+    }
   }
 }

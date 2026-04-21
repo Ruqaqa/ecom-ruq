@@ -29,7 +29,7 @@ describe("withTenant", () => {
   const tenantId = randomUUID();
   const ctx = buildAuthedTenantContext(
     { id: tenantId },
-    { userId: null, role: "anonymous" },
+    { userId: null, actorType: "anonymous", tokenId: null, role: "anonymous" },
   );
 
   it("sets app.tenant_id GUC inside the transaction", async () => {
@@ -46,7 +46,7 @@ describe("withTenant", () => {
   it("rejects nested invocations (flat-only)", async () => {
     const inner = buildAuthedTenantContext(
       { id: tenantId },
-      { userId: null, role: "anonymous" },
+      { userId: null, actorType: "anonymous", tokenId: null, role: "anonymous" },
     );
     await expect(
       withTenant(db, ctx, async () => {

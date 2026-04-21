@@ -6,15 +6,15 @@
  * to obtain one is through `buildAuthedTenantContext`, which is called at
  * the tRPC / MCP adapter layer after authentication + tenant resolution.
  *
- * Convention (per architect addendum 3):
- *   - Keep the Phase 0 field set minimal: tenantId + brand only.
- *   - Additional fields (userId, actorType, tokenId, role, ...) land in chunk 6
- *     when the adapter has a real authenticated session to populate them. The
- *     service-layer Tier-B output decisions (prd.md §3.7) and the adapter-
- *     layer audit wrap (M4d) will need them.
+ * Block 2b widens the shape from the chunk-5 placeholder (tenantId + brand
+ * only) to the full set the audit middleware and service-layer Tier-B
+ * output gating need: userId, actorType, tokenId, role. The factory
+ * signature is unchanged — only the body.
+ *
+ * Convention:
  *   - Treat the context as OPAQUE at call sites. Do NOT destructure; pass
- *     through. Only `buildAuthedTenantContext` and `withTenant` read fields.
- *     This keeps chunk 6 a widening of the factory, not a codebase sweep.
+ *     through. Only `buildAuthedTenantContext`, `withTenant`, and the
+ *     audit middleware read fields.
  *
  * Rule for nested invocations (enforced in withTenant): flat-only. A service
  * fn that needs DB access takes the existing `tx` argument — never re-enters
@@ -24,32 +24,46 @@ import type { Tenant } from "../tenant";
 
 declare const authedContextBrand: unique symbol;
 
-export type Role = "owner" | "staff" | "support" | "anonymous";
+export type Role = "owner" | "staff" | "support" | "customer" | "anonymous";
 
-// TODO(chunk 6): replace with the real Better Auth session type and wire
-// userId / actorType / tokenId / role into AuthedTenantContext via the
-// factory below. Callers do not need to change when this happens.
-export interface SessionPlaceholder {
+export type ActorType = "user" | "system" | "anonymous";
+
+/**
+ * The session shape the tRPC and MCP adapters hand to
+ * `buildAuthedTenantContext`. Adapters derive this from
+ * `resolveRequestIdentity` + `resolveMembership`:
+ *   - anonymous identity         → userId null, actorType 'anonymous', role 'anonymous'
+ *   - session identity + no row  → actorType 'user', role 'customer'
+ *   - session identity + row     → actorType 'user', role = membership.role
+ *   - bearer identity + row      → actorType 'user', tokenId set, role = membership.role
+ * `'system'` is reserved for chunk-7 cron/internal-job callers; the tRPC
+ * middleware never constructs it.
+ */
+export interface AuthedSession {
   userId: string | null;
+  actorType: ActorType;
+  tokenId: string | null;
   role: Role;
 }
 
 export interface AuthedTenantContext {
   readonly [authedContextBrand]: true;
   readonly tenantId: string;
-  // Additional fields added in chunk 6 — intentionally absent here.
-  // See the file header for the convention.
+  readonly userId: string | null;
+  readonly actorType: ActorType;
+  readonly tokenId: string | null;
+  readonly role: Role;
 }
 
 export function buildAuthedTenantContext(
   resolvedTenant: Pick<Tenant, "id">,
-  _session: SessionPlaceholder,
+  session: AuthedSession,
 ): AuthedTenantContext {
-  // `_session` is accepted and will be consumed in chunk 6 to populate
-  // userId / actorType / tokenId / role on the returned context. Taking it
-  // as a required argument now means chunk 6 does not change the factory
-  // signature — only the body.
   return {
     tenantId: resolvedTenant.id,
+    userId: session.userId,
+    actorType: session.actorType,
+    tokenId: session.tokenId,
+    role: session.role,
   } as AuthedTenantContext;
 }

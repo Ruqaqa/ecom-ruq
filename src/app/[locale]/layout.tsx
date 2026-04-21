@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import { hasLocale } from "next-intl";
 import { routing, localeDirection, type Locale } from "@/i18n/routing";
 import { getTenant } from "@/server/tenant";
+import { Providers } from "../providers";
 import "../globals.css";
 
 const inter = Inter({
@@ -63,7 +64,9 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} dir={dir} className={`${inter.variable} ${ibmPlexArabic.variable}`}>
       <body className={locale === "ar" ? "font-arabic" : "font-latin"}>
-        <NextIntlClientProvider messages={messages}>{children}</NextIntlClientProvider>
+        <NextIntlClientProvider messages={messages}>
+          <Providers>{children}</Providers>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

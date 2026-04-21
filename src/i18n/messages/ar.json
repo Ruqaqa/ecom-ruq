@@ -40,5 +40,30 @@
     "errorRateLimited": "محاولات كثيرة. حاول بعد عدة دقائق.",
     "errorUnverified": "يرجى تأكيد بريدك الإلكتروني قبل تسجيل الدخول.",
     "errorGeneric": "حدث خطأ."
+  },
+  "admin": {
+    "products": {
+      "create": {
+        "title": "منتج جديد",
+        "slugEn": "المعرف (بالإنجليزية)",
+        "slugAr": "المعرف (بالعربية)",
+        "nameEn": "الاسم (بالإنجليزية)",
+        "nameAr": "الاسم (بالعربية)",
+        "descriptionEn": "الوصف (بالإنجليزية)",
+        "descriptionAr": "الوصف (بالعربية)",
+        "status": "الحالة",
+        "statusDraft": "مسودة",
+        "statusActive": "مفعّل",
+        "submit": "إنشاء المنتج",
+        "forbidden": "ليس لديك صلاحية إنشاء منتجات.",
+        "error": "تعذّر إنشاء المنتج. راجع بياناتك.",
+        "validationTooLong": "طويل جدًا — جرّب قيمة أقصر.",
+        "validationRequired": "هذا الحقل مطلوب."
+      },
+      "list": {
+        "title": "المنتجات",
+        "createdMessage": "تم الإنشاء: {id}"
+      }
+    }
   }
 }

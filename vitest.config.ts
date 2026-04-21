@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx"],
     exclude: ["tests/e2e/**", "node_modules/**", ".next/**"],
+    setupFiles: ["tests/unit/_setup/load-env.ts"],
     environment: "node",
     reporters: ["default"],
     coverage: {

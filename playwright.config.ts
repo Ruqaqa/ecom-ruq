@@ -62,6 +62,23 @@ const config: PlaywrightTestConfig = {
     command: process.env.PLAYWRIGHT_USE_DEV === "1" ? "pnpm dev" : "pnpm build && pnpm start",
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
+    // Disable the auth rate-limit in the E2E server. Rate-limit
+    // behaviour is fully covered by the unit tests in
+    // tests/unit/auth/rate-limit-wire.test.ts; Playwright tests are
+    // about user flows, and Playwright's parallel auth tests would
+    // otherwise burn the per-IP budget (pnpm start runs on the loopback
+    // with no x-forwarded-for proxy, so every caller shares the
+    // 'unknown-ip' bucket).
+    //
+    // Bypass is DOUBLE-GATED: both APP_ENV === "e2e" AND
+    // E2E_AUTH_RATE_LIMIT_DISABLED === "1" are required. Real prod
+    // deploys (Coolify) set neither, so the path is unreachable outside
+    // this harness. See src/server/auth/rate-limit-auth-hook.ts for the
+    // gate body.
+    env: {
+      APP_ENV: "e2e",
+      E2E_AUTH_RATE_LIMIT_DISABLED: "1",
+    },
     stdout: "pipe",
     stderr: "pipe",
     timeout: 300_000,

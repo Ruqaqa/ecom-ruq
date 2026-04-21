@@ -37,6 +37,9 @@ export const products = pgTable(
     description: jsonb("description").$type<LocalizedTextPartial>(),
     status: text("status").notNull().default("draft"),
     categoryId: uuid("category_id").references(() => categories.id, { onDelete: "set null" }),
+    // Tier-B per prd.md §6.5 — operator-only; see src/server/services/products/create-product.ts
+    // for the Zod output-gate that drops this column for non-admin roles.
+    costPriceMinor: integer("cost_price_minor"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

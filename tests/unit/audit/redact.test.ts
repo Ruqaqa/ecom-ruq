@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { redactForAudit, DEFAULT_REGISTRY } from "@/server/audit/redact";
+import {
+  redactForAudit,
+  DEFAULT_REGISTRY,
+  BELT_AND_BRACES_PII_KEYS,
+} from "@/server/audit/redact";
 
 describe("redactForAudit", () => {
   it("replaces known Tier-A fields with a redaction marker", () => {
@@ -38,5 +42,88 @@ describe("redactForAudit", () => {
 
   it("uses the default registry when none passed", () => {
     expect(DEFAULT_REGISTRY.identity_verifications).toContain("payload");
+  });
+});
+
+describe("redactForAudit — BELT_AND_BRACES_PII_KEYS safety net", () => {
+  it("exports the list with password / token / secret / card / nationalId entries", () => {
+    const lower = BELT_AND_BRACES_PII_KEYS.map((k) => k.toLowerCase());
+    for (const expected of [
+      "password",
+      "token",
+      "secret",
+      "cardnumber",
+      "nationalid",
+    ]) {
+      expect(lower).toContain(expected);
+    }
+  });
+
+  it("includes the extended identity/contact safety-net keys (email, phone, iban, refreshToken, bearer)", () => {
+    const lower = BELT_AND_BRACES_PII_KEYS.map((k) => k.toLowerCase());
+    for (const expected of ["email", "phone", "iban", "refreshtoken", "bearer"]) {
+      expect(lower).toContain(expected);
+    }
+  });
+
+  it("redacts email / phone / iban on mixed-case keys", () => {
+    const out = redactForAudit(
+      { Email: "a@b.c", PHONE: "+966500", Iban: "SA00...", other: "ok" },
+      "default",
+    );
+    expect(out).toMatchObject({
+      Email: "[REDACTED_SENSITIVE]",
+      PHONE: "[REDACTED_SENSITIVE]",
+      Iban: "[REDACTED_SENSITIVE]",
+      other: "ok",
+    });
+  });
+
+  it("redacts case-insensitive matches at the top level (Password, PASSWORD, password)", () => {
+    const out = redactForAudit(
+      { Password: "a", PASSWORD: "b", password: "c", safe: "keep" },
+      "default",
+    );
+    expect(out).toMatchObject({
+      Password: "[REDACTED_SENSITIVE]",
+      PASSWORD: "[REDACTED_SENSITIVE]",
+      password: "[REDACTED_SENSITIVE]",
+      safe: "keep",
+    });
+  });
+
+  it("recurses into nested objects so { a: { token } } is caught", () => {
+    const out = redactForAudit(
+      { a: { token: "xyz", safe: "ok" }, top: "visible" },
+      "default",
+    );
+    expect(out).toMatchObject({
+      a: { token: "[REDACTED_SENSITIVE]", safe: "ok" },
+      top: "visible",
+    });
+  });
+
+  it("composes with entity registry — both Tier-A and PII keys are replaced", () => {
+    const out = redactForAudit(
+      { payload: Buffer.from("x"), password: "p" },
+      "identity_verifications",
+    );
+    expect(out.payload).toBe("[REDACTED_TIER_A]");
+    expect((out as unknown as { password: string }).password).toBe(
+      "[REDACTED_SENSITIVE]",
+    );
+  });
+
+  it("recurses into arrays of objects", () => {
+    const out = redactForAudit(
+      [
+        { token: "t1", id: 1 },
+        { token: "t2", id: 2 },
+      ],
+      "default",
+    );
+    expect(out[0]?.token).toBe("[REDACTED_SENSITIVE]");
+    expect(out[1]?.token).toBe("[REDACTED_SENSITIVE]");
+    expect(out[0]?.id).toBe(1);
   });
 });

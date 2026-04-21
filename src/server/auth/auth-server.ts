@@ -37,8 +37,36 @@ import { resolveTenant } from "@/server/tenant";
 import { sendTenantEmail } from "@/server/email/send-tenant-email";
 import { isBreachedPassword } from "./breached-passwords";
 import { hashMagicLinkToken } from "./magic-link-hash";
+import { enforceAuthRateLimit } from "./rate-limit-auth-hook";
+import {
+  userCreateAfter,
+  userUpdateAfter,
+  verificationCreateAfter,
+  sessionCreateAfter,
+  sessionDeleteAfter,
+} from "./audit-hooks";
+import { writeAuditInOwnTx } from "@/server/audit/write";
+import type { AuditErrorCode } from "@/server/audit/error-codes";
+import { randomUUID } from "node:crypto";
 import type { Locale } from "@/i18n/routing";
 import { routing } from "@/i18n/routing";
+
+function mapBAErrorToAuditCode(err: {
+  message?: string;
+  statusCode?: number;
+}): AuditErrorCode {
+  const msg = err.message ?? "";
+  if (msg.includes("USER_ALREADY_EXISTS")) return "conflict";
+  if (err.statusCode === 429) return "rate_limited";
+  if (
+    msg.includes("PASSWORD_COMPROMISED") ||
+    msg.includes("PASSWORD_TOO_SHORT") ||
+    msg.includes("new_user_signup_disabled")
+  ) {
+    return "validation_failed";
+  }
+  return "internal_error";
+}
 
 // We need to build our own Drizzle client here because BA's drizzle adapter
 // expects the *original* drizzle client (not the lazy Nullable appDb). Also
@@ -204,11 +232,35 @@ export const auth = betterAuth({
     }),
   ],
   hooks: {
-    // Breached-password check on password-writing paths. Chunk 5 does the
-    // simple pre-hash filter here; chunk 6 wraps sign-up with the Redis
-    // sliding window and audit trail.
+    // Two-step before-chain: rate-limit first (fail-fast, cheaper to
+    // reject hostile traffic before any crypto/DB work), then
+    // breached-password check on password-writing paths.
+    //
+    // The rate-limit helper owns: policy lookup, per-tenant bucket key
+    // construction, IP/email two-tier check, Redis-outage fail-closed,
+    // and audit write on reject. See ./rate-limit-auth-hook.ts.
     before: createAuthMiddleware(async (ctx) => {
       const path = (ctx.path ?? "") as string;
+
+      // Step 1 — rate-limit gate. Only fires for paths in AUTH_LIMITS;
+      // unknown paths short-circuit allowed inside the helper.
+      const tenant = await resolveTenant(hostFromRequest(ctx.request));
+      if (tenant) {
+        const result = await enforceAuthRateLimit({
+          path,
+          tenantId: tenant.id,
+          headers: ctx.request?.headers ?? new Headers(),
+          body: ctx.body,
+        });
+        if (!result.allowed) {
+          throw new APIError("TOO_MANY_REQUESTS", {
+            message: "Too many attempts. Please wait and try again.",
+            code: "RATE_LIMITED",
+          });
+        }
+      }
+
+      // Step 2 — breached-password filter on password-writing paths.
       const writesPassword =
         path === "/sign-up/email" ||
         path === "/change-password" ||
@@ -222,11 +274,93 @@ export const auth = betterAuth({
             ? body.newPassword
             : null;
       if (candidate && isBreachedPassword(candidate)) {
+        // Audit INLINE before throwing — BA doesn't call hooks.after
+        // when hooks.before throws (to-auth-endpoints.mjs:92–93
+        // short-circuits). For any audit path that fires from inside
+        // hooks.before, write the failure row here. Tenant resolution
+        // option B: skip on unknown host.
+        if (path === "/sign-up/email" && tenant) {
+          await writeAuditInOwnTx({
+            tenantId: tenant.id,
+            operation: "auth.signup",
+            actorType: "anonymous",
+            actorId: null,
+            tokenId: null,
+            outcome: "failure",
+            correlationId: randomUUID(),
+            errorCode: "validation_failed",
+          });
+        }
         throw new APIError("BAD_REQUEST", {
           message: "That password has been seen in a breach. Please choose a different one.",
           code: "PASSWORD_COMPROMISED",
         });
       }
     }),
+    // Failure-path audit for /sign-up/email. Success is audited at
+    // user.create.after (audit-hooks.ts:userCreateAfter). A failure
+    // here means BA threw before user creation — duplicate email,
+    // validation, rate-limit, etc. Tenant resolution option B: skip
+    // on unknown host; Sentry-alert unless APP_ENV=seed.
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/sign-up/email") return;
+      const returned = ctx.context.returned as unknown;
+      const isError =
+        returned != null &&
+        typeof returned === "object" &&
+        ((returned as { name?: string }).name === "APIError" ||
+          returned instanceof Error);
+      if (!isError) return;
+      const err = returned as { message?: string; statusCode?: number };
+      const errorCode = mapBAErrorToAuditCode(err);
+
+      let host: string | null = null;
+      if (ctx.request) {
+        try {
+          host = new URL(ctx.request.url).host.toLowerCase();
+        } catch {
+          host = null;
+        }
+      }
+      const tenant = host ? await resolveTenant(host) : null;
+      if (!tenant) {
+        if (process.env.APP_ENV !== "seed") {
+          const { captureMessage } = await import("@/server/obs/sentry");
+          captureMessage("audit_write_failure", {
+            level: "error",
+            tags: {
+              reason: "tenant_resolution_lost_at_hook",
+              operation: "auth.signup",
+            },
+          });
+        }
+        return;
+      }
+      await writeAuditInOwnTx({
+        tenantId: tenant.id,
+        operation: "auth.signup",
+        actorType: "anonymous",
+        actorId: null,
+        tokenId: null,
+        outcome: "failure",
+        correlationId: randomUUID(),
+        errorCode,
+        // NO input, NO after — chain holds structure; Sentry holds
+        // detail. Per block-2 High-01 invariant.
+      });
+    }),
+  },
+  databaseHooks: {
+    user: {
+      create: { after: userCreateAfter },
+      update: { after: userUpdateAfter },
+    },
+    session: {
+      create: { after: sessionCreateAfter },
+      delete: { after: sessionDeleteAfter },
+    },
+    verification: {
+      create: { after: verificationCreateAfter },
+    },
   },
 });

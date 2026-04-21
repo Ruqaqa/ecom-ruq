@@ -186,13 +186,167 @@ as "deny". This is not a bug; it's the prd.md §3.6 model: users belong to
 the platform, not a tenant, so a single shopper can have carts and orders
 across multiple tenants without any membership row ever being created.
 
-## What chunk 6 will change here
+## Rate limit policy (chunk 6 block 5)
 
-- The audit helper at `src/server/auth/audit-helpers.ts` is marked
-  `TEMPORARY — delete when chunk 6 ships audit adapter` at the top. Chunk 6
-  wraps audit at the tRPC / MCP adapter layer; chunk 5 writes auth events
-  directly via this helper so the Phase 0 chain is complete.
-- Rate limiting for `/api/auth/*` gets wired into BA's `hooks.before`
-  (or via a small Next.js route handler wrapper) to call `checkRateLimit`.
-- `resolveRequestIdentity` is consumed by the tRPC context factory;
-  BA-specific types remain hidden.
+`src/server/auth/rate-limit-auth-hook.ts` wires the Redis sliding-window
+primitive into BA's `hooks.before`. Every auth endpoint in `AUTH_LIMITS`
+passes through a two-tier check:
+
+- **Per-IP** bucket key `auth:{tenantId}:{path}:ip:{ip}`. IP read
+  from `x-real-ip` ONLY (the reverse proxy sets this); falls back to
+  `unknown-ip` when the header is absent. `x-forwarded-for` is
+  DELIBERATELY ignored — see "Traefik / proxy requirement" below.
+- **Per-identity** (email) bucket key `auth:{tenantId}:{path}:email:{lc-email}`.
+  Only applied on paths whose policy sets `identityKey: 'email'`.
+
+Per-tenant prefix is the **isolation boundary** — one tenant's attack
+cannot lock another tenant's users.
+
+Current limits (see `AUTH_LIMITS` for the source of truth):
+
+| Path                 | Per-IP        | Per-email     | Notes                                 |
+|----------------------|---------------|---------------|---------------------------------------|
+| /sign-up/email       | 20/min        | 5/15min       | Catches enumeration                   |
+| /sign-in/email       | 20/min        | 5/min         | Catches credential stuffing + spray   |
+| /forget-password     | 10/5min       | 3/hour        | Expensive email send; tight per-email |
+| /reset-password      | 20/min        | — (IP-only)   | Token-gated; user may retry           |
+| /sign-in/magic-link  | 10/min        | 3/15min       | Send-side, expensive                  |
+| /magic-link/verify   | 30/min        | — (IP-only)   | Token-gated verify; loose             |
+
+**Reject outcome:** `APIError('TOO_MANY_REQUESTS', { code: 'RATE_LIMITED' })`.
+Every rejection writes an `auth.rate-limit-exceeded` audit row
+(`error = '{"code":"rate_limited"}'` per the block-2 closed-set
+invariant). The audit payload carries structural facts only
+(`path`, `ipLimited`, `emailLimited`) — never the raw request body,
+which may include a Tier-B email.
+
+**Fail-closed on Redis outage:** `checkRateLimit` throws when the
+pipeline returns null; the hook converts that to
+`APIError('SERVICE_UNAVAILABLE', { code: 'RATE_LIMITER_UNAVAILABLE' })`.
+The auth request does NOT pass through. If you see 503s with that code
+in production, the primary lever is Redis health; secondarily, check
+the `ratelimit:auth:*` key count in Redis for a runaway bucket.
+
+**Traefik / proxy requirement (High-02):** The reverse proxy (Traefik
+under Coolify) MUST set `X-Real-IP` to the client's true IP. Traefik
+sets this by default when routing; confirm via `curl -v` against the
+deployed URL that the header arrives at the app. If the header is
+absent, every per-IP rate-limit bucket resolves to a single global
+`'unknown-ip'` bucket — auth requests from ANY client will compete
+for that budget, which is the correct fail-closed behavior but will be
+noisy for real users.
+
+We deliberately do NOT read `X-Forwarded-For`: Traefik's default is
+append-mode, and the first entry of a client-submitted XFF header is
+attacker-controlled. Reading `X-Real-IP` (which the proxy writes and
+re-sets, ignoring any client value) is the only safe option. A unit
+test at `tests/unit/auth/rate-limit-wire.test.ts` adversarially asserts
+that XFF alone yields `'unknown-ip'` — the attacker-cannot-inject-IP
+invariant.
+
+**Per-email bucket normalization (Medium-02):** The per-email
+rate-limit bucket key runs the caller-supplied email through
+`normalizeEmailForBucket()` — lower-case + NFKC + strip plus-alias
+suffix of the local-part. `alice@gmail.com`, `alice+1@gmail.com`, and
+`alice+99@gmail.com` all share one bucket. Plus-alias rotation does
+NOT defeat the per-email tier. Visual homoglyphs (e.g. Latin 'i' vs
+Turkish dotless 'ı') stay in distinct buckets — those are semantically
+distinct inputs. The normalized form is ONLY used for the bucket key;
+Better Auth receives the raw caller-supplied email unmodified.
+
+**Dev-bypass for `unknown-ip`:** `pnpm dev` has no reverse proxy in
+front, so every caller resolves to `unknown-ip` (the `extractIp`
+fallback). Under a strict per-IP cap this collapses dev usability —
+any developer clicking around signup/signin in a browser hits the cap
+in a few attempts. The hook therefore skips the per-IP tier when
+`ip === 'unknown-ip'` AND `NODE_ENV !== 'production'`. The
+per-identity (email) tier STILL fires under those conditions, so
+credential-stuffing dev tests remain meaningful. In production the
+Traefik/Coolify proxy MUST set `x-real-ip` — if it doesn't, we
+fail closed (the bypass is gated on NODE_ENV, not on a missing proxy
+in prod).
+
+**Playwright global-setup flushes rate-limit buckets.**
+`tests/e2e/global-setup.ts` does a `SCAN ... MATCH ratelimit:auth:* DEL`
+at suite start to give every run a clean slate.
+
+**E2E bypass — prod-unreachable by design.**
+Playwright runs the production *build* (`pnpm build && pnpm start`)
+which sets `NODE_ENV=production`, so a NODE_ENV-only gate would block
+the bypass under E2E. Instead the bypass is DOUBLE-GATED on two
+independent env vars:
+
+- `APP_ENV === "e2e"` — a separate "deployment target" dimension owned
+  by this repo (NOT by Next.js).
+- `E2E_AUTH_RATE_LIMIT_DISABLED === "1"` — an explicit opt-in flag.
+
+Both must be present. Real prod deploys (Coolify) set neither, so the
+bypass is unreachable there. Set by `playwright.config.ts` webServer
+env and nowhere else — if someone copies `E2E_...` into a prod env file
+the bypass still does not activate, because `APP_ENV !== "e2e"`.
+
+E2E tests that need to exercise the limiter-engaged path (e.g. the
+rate-limit-exceeded PII canary) set `x-dev-only-enforce-rate-limit: 1`
+per request; the header is a no-op outside the double-gated E2E
+bypass (APP_ENV=e2e && E2E_AUTH_RATE_LIMIT_DISABLED=1), so a prod
+container never reads it.
+
+**Critical — E2E bypass must NOT reach prod.** Any prod deploy whose
+environment contains `APP_ENV=e2e` OR `E2E_AUTH_RATE_LIMIT_DISABLED=1`
+is a misconfigured deploy. Coolify's production env config MUST set
+neither. Chunk 9's CI workflow will lint Coolify env files for these
+keys and fail the deploy if found. Chunk 9 also adds a hard-refuse
+boot check: the server refuses to start in prod (NODE_ENV=production)
+with either flag set. This note lives here so the boot check is not
+forgotten during chunk-9 CI work.
+
+## Audit wiring for auth events (chunk 6 block 7)
+
+BA's `databaseHooks` in `src/server/auth/auth-server.ts` invokes five
+audit call sites in `src/server/auth/audit-hooks.ts`:
+
+- `userCreateAfter` → `auth.signup` (success).
+- `userUpdateAfter` → `auth.verify-email` when `emailVerified` flipped true.
+- `verificationCreateAfter` → `auth.magic-link.request` on
+  `ctx.path === "/sign-in/magic-link"` only (password-reset verification
+  rows land later).
+- `sessionCreateAfter` → `auth.session.create` always; additionally
+  `auth.magic-link.consume` on `ctx.path === "/magic-link/verify"`,
+  sharing the same `correlationId` as the session.create row so
+  operators can join the two.
+- `sessionDeleteAfter` → `auth.session.revoke` with reason-enum
+  `'user_signout' | 'system' | 'unknown'` derived from `ctx.path`.
+
+The failure-path signup audit lives in `auth-server.ts`'s
+`hooks.after` (endpoint middleware). It reads `ctx.context.returned`
+for APIError-shaped throws and writes `auth.signup` with
+`outcome: "failure"` + an `errorCode` mapped from BA's error message
+(`USER_ALREADY_EXISTS` → conflict, 429 → rate_limited, etc.). No
+`input`, no `after` — chain holds structure; Sentry holds detail.
+
+**Tenant resolution at hook sites (Option B):** when the BA ctx is
+null or `resolveTenant` returns null, SKIP the audit write and fire
+a Sentry `audit_write_failure` alert with
+`reason: "tenant_resolution_lost_at_hook"`. `APP_ENV=seed` suppresses
+the Sentry send so dev seed scripts don't flood the alert channel.
+
+**APP_ENV=seed sentinel:** dev seed scripts set `APP_ENV=seed` to
+suppress the `audit_write_failure` Sentry send on nullable-ctx BA
+hook fires. The Option-B audit-skip invariant is preserved; only the
+Sentry alert is suppressed. Chunk-9 CI env-lint rejects `APP_ENV=seed`
+in prod Coolify, same class as `APP_ENV=e2e`.
+
+**Session-revoke reason-enum:** `'user_signout'` when
+`ctx.path === '/sign-out'`, `'system'` when `ctx === null` (internal
+code paths), `'unknown'` fallback. `'admin_revoke'` branch to be added
+when the `/admin/revoke-session` endpoint lands (not block 7).
+
+**Four-row shape on magic-link-first-consume:** `/magic-link/verify`
+for a previously-unknown email triggers four sequential audit writes
+— `auth.signup`, `auth.verify-email`, `auth.magic-link.consume`,
+`auth.session.create` — each grabbing the per-tenant
+`pg_advisory_xact_lock('audit_log:' || tenant_id)`. Under contention
+this 4x-multiplies the lock window for one user-facing event. Not a
+correctness issue (chain writes are fast; lock is per-tenant not
+global) but worth knowing if operator sees magic-link-verify latency
+spikes for a specific tenant.
