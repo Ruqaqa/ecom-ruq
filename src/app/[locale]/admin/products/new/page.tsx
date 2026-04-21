@@ -24,7 +24,7 @@ export default async function NewProductPage({
 
   return (
     <main className="flex min-h-screen items-start justify-center p-6 pt-12">
-      <div className="w-full max-w-lg">
+      <div className="w-full max-w-4xl">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <div className="mt-6">
           <CreateProductForm locale={locale as Locale} />

@@ -135,84 +135,96 @@ export function CreateProductForm({ locale }: Props) {
         </p>
       ) : null}
 
-      <SlugField
-        slug={slug}
-        liveError={slugError}
-        serverErrors={fieldErrors["slug"]}
-        onSlugChange={onSlugChange}
-        onSyncFromName={onSyncFromName}
-        labels={{
-          label: t("slug"),
-          helper: t("slugHelper"),
-          syncAriaLabel: t("slugSyncAriaLabel"),
-          errorMessages: {
-            empty: t("slugError.empty"),
-            too_long: t("slugError.too_long"),
-            invalid_chars: t("slugError.invalid_chars"),
-            leading_hyphen: t("slugError.leading_hyphen"),
-            trailing_hyphen: t("slugError.trailing_hyphen"),
-            consecutive_hyphens: t("slugError.consecutive_hyphens"),
-          },
-        }}
-      />
-      <FormField
-        id="product-name-en"
-        name="name.en"
-        label={t("nameEn")}
-        value={nameEn}
-        onChange={onNameEnChange}
-        required
-        errors={fieldErrors["name.en"] ?? fieldErrors["name"]}
-      />
-      <FormField
-        id="product-name-ar"
-        name="name.ar"
-        label={t("nameAr")}
-        value={nameAr}
-        onChange={setNameAr}
-        required
-        errors={fieldErrors["name.ar"]}
-      />
-      <FormTextarea
-        id="product-description-en"
-        name="description.en"
-        label={t("descriptionEn")}
-        value={descriptionEn}
-        onChange={setDescriptionEn}
-        errors={fieldErrors["description.en"]}
-      />
-      <FormTextarea
-        id="product-description-ar"
-        name="description.ar"
-        label={t("descriptionAr")}
-        value={descriptionAr}
-        onChange={setDescriptionAr}
-        errors={fieldErrors["description.ar"]}
-      />
-
-      <div>
-        <label htmlFor="product-status" className="block text-sm font-medium">
-          {t("status")}
-        </label>
-        <select
-          id="product-status"
-          name="status"
-          value={status}
-          onChange={(e) => setStatus(e.target.value === "active" ? "active" : "draft")}
-          className="mt-1 block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-900"
-        >
-          <option value="draft">{t("statusDraft")}</option>
-          <option value="active">{t("statusActive")}</option>
-        </select>
+      <div className="space-y-4 sm:flex sm:items-start sm:gap-4 sm:space-y-0">
+        <div className="sm:w-full sm:max-w-lg">
+          <FormField
+            id="product-name-en"
+            name="name.en"
+            label={t("nameEn")}
+            value={nameEn}
+            onChange={onNameEnChange}
+            required
+            errors={fieldErrors["name.en"] ?? fieldErrors["name"]}
+          />
+        </div>
+        <div
+          aria-hidden="true"
+          className="hidden self-stretch bg-neutral-200 sm:block sm:w-px dark:bg-neutral-800"
+        />
+        <div className="sm:flex-1">
+          <SlugField
+            slug={slug}
+            liveError={slugError}
+            serverErrors={fieldErrors["slug"]}
+            onSlugChange={onSlugChange}
+            onSyncFromName={onSyncFromName}
+            labels={{
+              label: t("slug"),
+              helper: t("slugHelper"),
+              syncAriaLabel: t("slugSyncAriaLabel"),
+              errorMessages: {
+                empty: t("slugError.empty"),
+                too_long: t("slugError.too_long"),
+                invalid_chars: t("slugError.invalid_chars"),
+                leading_hyphen: t("slugError.leading_hyphen"),
+                trailing_hyphen: t("slugError.trailing_hyphen"),
+                consecutive_hyphens: t("slugError.consecutive_hyphens"),
+              },
+            }}
+          />
+        </div>
       </div>
+      <div className="space-y-4 sm:max-w-lg">
+        <FormField
+          id="product-name-ar"
+          name="name.ar"
+          label={t("nameAr")}
+          value={nameAr}
+          onChange={setNameAr}
+          required
+          errors={fieldErrors["name.ar"]}
+        />
+        <FormTextarea
+          id="product-description-en"
+          name="description.en"
+          label={t("descriptionEn")}
+          value={descriptionEn}
+          onChange={setDescriptionEn}
+          errors={fieldErrors["description.en"]}
+        />
+        <FormTextarea
+          id="product-description-ar"
+          name="description.ar"
+          label={t("descriptionAr")}
+          value={descriptionAr}
+          onChange={setDescriptionAr}
+          errors={fieldErrors["description.ar"]}
+        />
 
-      <button
-        type="submit"
-        disabled={submitDisabled}
-        className="flex h-11 w-full items-center justify-center rounded-md bg-neutral-900 text-base font-medium text-white disabled:opacity-60 dark:bg-white dark:text-neutral-900"
-      >
-        {t("submit")}
-      </button>
+        <div>
+          <label htmlFor="product-status" className="block text-sm font-medium">
+            {t("status")}
+          </label>
+          <select
+            id="product-status"
+            name="status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value === "active" ? "active" : "draft")}
+            className="mt-1 block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-900"
+          >
+            <option value="draft">{t("statusDraft")}</option>
+            <option value="active">{t("statusActive")}</option>
+          </select>
+        </div>
+
+        <button
+          type="submit"
+          disabled={submitDisabled}
+          className="flex h-11 w-full items-center justify-center rounded-md bg-neutral-900 text-base font-medium text-white disabled:opacity-60 dark:bg-white dark:text-neutral-900"
+        >
+          {t("submit")}
+        </button>
+      </div>
     </form>
   );
 }
