@@ -37,6 +37,21 @@ import { writeAuditInOwnTx } from "@/server/audit/write";
 import { bumpLastUsedAt, shouldWriteLastUsedAt } from "@/server/auth/last-used-debounce";
 import { McpError, auditErrorCodeToMcpKind } from "./errors";
 
+/**
+ * Decision 1 (7.4): `forbidden` refusals are always audited, regardless
+ * of `auditMode`. A tool registered with `auditMode:"none"` (a read,
+ * per prd §3.7) that refuses with `forbidden` is a security-relevant
+ * event on par with a blocked mutation, so it DOES land in
+ * `audit_log`. Non-forbidden failures on reads continue to skip audit.
+ */
+function shouldAuditForbiddenRefusal(
+  auditMode: ToolAuditConfig["auditMode"],
+  err: unknown,
+): boolean {
+  if (auditMode === "mutation") return true; // pre-existing behavior
+  return err instanceof McpError && err.kind === "forbidden";
+}
+
 export interface ToolAuditConfig {
   auditMode: "mutation" | "none";
 }
@@ -95,17 +110,26 @@ export async function dispatchTool<TIn, TOut>(
 
   // Authorize + input parse live OUTSIDE runWithAudit — both failure
   // modes (forbidden, validation_failed) should write audit rows
-  // WITHOUT opening a tenant-scoped tx. For mutation-mode tools,
-  // wrap both in a try/catch that records a failure audit row via
-  // `writeAuditInOwnTx` (its own tx). For non-mutation tools,
-  // failures propagate without audit (reads aren't audited per
-  // prd.md §3.7).
+  // WITHOUT opening a tenant-scoped tx. For mutation-mode tools we
+  // audit ALL failures here. For non-mutation tools we audit ONLY
+  // `forbidden` refusals (Decision 1, 7.4): refusals are a
+  // security-relevant event even on reads. Other read failures
+  // (validation, internal) still skip audit per prd §3.7.
   let parsedInput: TIn;
   try {
     tool.authorize(ctx);
     parsedInput = tool.inputSchema.parse(rawInput);
   } catch (err) {
-    if (config.auditMode === "mutation") {
+    if (shouldAuditForbiddenRefusal(config.auditMode, err)) {
+      // `mapErrorToAuditCode` has no McpError case (it predates this
+      // transport and falls back to `internal_error` for unknown
+      // shapes). For McpError refusals we already know the closed-set
+      // kind; use it directly so a `forbidden` throw audits as
+      // `forbidden`, not `internal_error`.
+      const errorCode =
+        err instanceof McpError && err.kind === "forbidden"
+          ? ("forbidden" as const)
+          : mapErrorToAuditCode(err);
       await writeAuditInOwnTx({
         tenantId: ctx.tenant.id,
         operation,
@@ -115,7 +139,7 @@ export async function dispatchTool<TIn, TOut>(
         outcome: "failure",
         correlationId: ctx.correlationId,
         input: inputForFailure(err),
-        errorCode: mapErrorToAuditCode(err),
+        errorCode,
       });
     }
     throw toMcpError(err);
