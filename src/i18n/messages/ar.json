@@ -73,6 +73,72 @@
         "title": "المنتجات",
         "createdMessage": "تم الإنشاء: {id}"
       }
+    },
+    "tokens": {
+      "title": "رموز الوصول",
+      "subtitle": "رموز الوصول الشخصية تصادق على Claude Desktop وClaude Code وعملاء MCP الآخرين.",
+      "newButton": "رمز جديد",
+      "empty": "لا توجد رموز نشطة حتى الآن.",
+      "listHeading": "الرموز النشطة",
+      "loading": "جارٍ تحميل الرموز…",
+      "columns": {
+        "name": "الاسم",
+        "prefix": "البادئة",
+        "scopes": "الصلاحيات",
+        "lastUsed": "آخر استخدام",
+        "expires": "تاريخ الانتهاء",
+        "actions": "الإجراءات"
+      },
+      "lastUsedNever": "أبدًا",
+      "neverExpires": "لا تنتهي",
+      "roleOwner": "مالك",
+      "roleStaff": "موظف",
+      "roleSupport": "دعم",
+      "experimentalBadge": "تجريبي",
+      "revokeButton": "إلغاء",
+      "create": {
+        "heading": "رمز وصول جديد",
+        "nameLabel": "الاسم",
+        "nameHelper": "تسمية قصيرة لتمييز رموزك لاحقًا.",
+        "expiresLabel": "مدة الصلاحية",
+        "expires7": "٧ أيام",
+        "expires30": "٣٠ يومًا",
+        "expires90": "٩٠ يومًا",
+        "expires365": "سنة واحدة",
+        "scopeRoleLabel": "الدور",
+        "scopeRoleHelper": "المالك يمكنه إدارة كل شيء. الموظف يدير المهام اليومية. الدعم للقراءة فقط.",
+        "ownerScopeConfirmLabel": "نعم، أنشئ رمزًا بصلاحية مالك كاملة.",
+        "ownerScopeConfirmHelper": "رموز المالك يمكنها إنشاء وإلغاء رموز أخرى. احفظ هذا الرمز في مكان آمن.",
+        "experimentalHeading": "الأدوات التجريبية",
+        "experimentalSummary": "منح أدوات متقدمة (اختياري)",
+        "experimentalDescription": "هذه الصلاحيات تكشف أدوات غير أساسية. اتركها دون تحديد إلا إذا كنت تعرف سبب الحاجة إليها.",
+        "toolLabels": {
+          "run_sql_readonly": "وصول مباشر للقراءة من قاعدة البيانات"
+        },
+        "experimentalToolsConfirmLabel": "نعم، أنشئ هذا الرمز مع الأدوات التجريبية.",
+        "experimentalToolsConfirmHelper": "الرمز الذي يحمل أدوات تجريبية يصل إلى مكونات لا تصلها معظم الرموز. امنح هذه الصلاحية عند الحاجة فقط.",
+        "submit": "إنشاء الرمز",
+        "cancel": "إلغاء",
+        "errorValidation": "راجع النموذج — بعض الحقول تحتاج إلى تصحيح.",
+        "errorForbidden": "ليس لديك صلاحية إنشاء الرموز.",
+        "errorRateLimited": "تم إنشاء رموز كثيرة مؤخرًا. حاول بعد عدة دقائق.",
+        "errorGeneric": "تعذّر إنشاء الرمز. حاول مرة أخرى."
+      },
+      "reveal": {
+        "heading": "رمزك الجديد",
+        "body": "هذه المرة الوحيدة التي ستظهر فيها هذه القيمة. انسخها في مكان آمن قبل إغلاق هذه اللوحة.",
+        "copyButton": "نسخ",
+        "copied": "تم النسخ",
+        "copyBlocked": "تعذّر النسخ — حدّد القيمة وانسخها يدويًا.",
+        "ackButton": "لقد حفظت هذا الرمز بأمان"
+      },
+      "revoke": {
+        "dialogTitle": "إلغاء هذا الرمز؟",
+        "dialogBody": "إلغاء \"{name}\" سيوقف فورًا أي أداة أو وكيل يستخدمه. لا يمكن التراجع عن هذا الإجراء.",
+        "confirmButton": "إلغاء الرمز",
+        "cancelButton": "تراجع",
+        "errorGeneric": "تعذّر إلغاء الرمز. حاول مرة أخرى."
+      }
     }
   }
 }

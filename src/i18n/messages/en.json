@@ -73,6 +73,72 @@
         "title": "Products",
         "createdMessage": "Created: {id}"
       }
+    },
+    "tokens": {
+      "title": "Access tokens",
+      "subtitle": "Personal access tokens authenticate Claude Desktop, Claude Code, and other MCP clients.",
+      "newButton": "New token",
+      "empty": "No active tokens yet.",
+      "listHeading": "Active tokens",
+      "loading": "Loading tokens…",
+      "columns": {
+        "name": "Name",
+        "prefix": "Prefix",
+        "scopes": "Scopes",
+        "lastUsed": "Last used",
+        "expires": "Expires",
+        "actions": "Actions"
+      },
+      "lastUsedNever": "Never",
+      "neverExpires": "Never",
+      "roleOwner": "Owner",
+      "roleStaff": "Staff",
+      "roleSupport": "Support",
+      "experimentalBadge": "Experimental",
+      "revokeButton": "Revoke",
+      "create": {
+        "heading": "New access token",
+        "nameLabel": "Name",
+        "nameHelper": "A short label so you can tell your tokens apart later.",
+        "expiresLabel": "Expires in",
+        "expires7": "7 days",
+        "expires30": "30 days",
+        "expires90": "90 days",
+        "expires365": "1 year",
+        "scopeRoleLabel": "Role",
+        "scopeRoleHelper": "Owner can manage everything. Staff can run day-to-day admin. Support is read-only.",
+        "ownerScopeConfirmLabel": "Yes, mint a token with full owner access.",
+        "ownerScopeConfirmHelper": "Owner-scoped tokens can create and revoke other tokens. Keep this token somewhere safe.",
+        "experimentalHeading": "Experimental tools",
+        "experimentalSummary": "Grant advanced tools (optional)",
+        "experimentalDescription": "These grants expose non-core tools. Leave unchecked unless you know why you need them.",
+        "toolLabels": {
+          "run_sql_readonly": "Direct database read-only access"
+        },
+        "experimentalToolsConfirmLabel": "Yes, grant these experimental tools.",
+        "experimentalToolsConfirmHelper": "A token with experimental tool access can reach internals most tokens cannot. Grant only when needed.",
+        "submit": "Create token",
+        "cancel": "Cancel",
+        "errorValidation": "Please check the form — some fields need attention.",
+        "errorForbidden": "You don't have permission to create tokens.",
+        "errorRateLimited": "Too many tokens minted recently. Try again in a few minutes.",
+        "errorGeneric": "Could not create the token. Please try again."
+      },
+      "reveal": {
+        "heading": "Your new token",
+        "body": "This is the only time you'll see this value. Copy it somewhere safe before closing this panel.",
+        "copyButton": "Copy",
+        "copied": "Copied",
+        "copyBlocked": "Copy blocked — select and copy manually.",
+        "ackButton": "I've saved this token securely"
+      },
+      "revoke": {
+        "dialogTitle": "Revoke this token?",
+        "dialogBody": "Revoking \"{name}\" will immediately disconnect any tool or agent using it. This cannot be undone.",
+        "confirmButton": "Revoke",
+        "cancelButton": "Cancel",
+        "errorGeneric": "Could not revoke the token. Please try again."
+      }
     }
   }
 }

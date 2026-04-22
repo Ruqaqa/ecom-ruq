@@ -50,6 +50,22 @@ export default async function globalSetup(): Promise<void> {
       cursor = next;
       if (keys.length > 0) await redis.del(...keys);
     } while (cursor !== "0");
+    // Also flush the PAT issuance bucket. Sub-chunk 7.5 Playwright
+    // tests mint many PATs in parallel against the single dev tenant;
+    // the 20/hour rate limit is plenty for a human operator but not
+    // for a suite that spins up 4+ workers × multiple mint flows.
+    let ptCursor = "0";
+    do {
+      const [next, keys] = await redis.scan(
+        ptCursor,
+        "MATCH",
+        "ratelimit:pat:issuance:*",
+        "COUNT",
+        500,
+      );
+      ptCursor = next;
+      if (keys.length > 0) await redis.del(...keys);
+    } while (ptCursor !== "0");
   } catch {
     // Swallow — Redis unavailable means auth tests will fail loudly.
   } finally {

@@ -47,16 +47,35 @@ const MAX_EXPIRY_DAYS = 365;
 const ISSUANCE_LIMIT_PER_HOUR = 20;
 const ISSUANCE_WINDOW_SECONDS = 3600;
 
+/**
+ * Closed allowlist of tools a PAT may be granted access to via
+ * `scopes.tools`. Security H-1: arbitrary strings are an attack surface
+ * (e.g. a typo'd future tool name would be accepted with empty effect
+ * today but quietly become live when that tool ships). Keep this array
+ * grep-able — a new tool goes here when, and only when, it has a
+ * registered entry in `src/server/mcp/tools/` AND is owner-reachable.
+ */
+export const TOOL_ALLOWLIST = ["run_sql_readonly"] as const;
+export type AllowlistedTool = (typeof TOOL_ALLOWLIST)[number];
+const MAX_TOOLS_PER_TOKEN = 32;
+
 const ScopesSchema = z.object({
   role: z.enum(["owner", "staff", "support"]),
-  tools: z.array(z.string()).optional(),
+  tools: z.array(z.enum(TOOL_ALLOWLIST)).max(MAX_TOOLS_PER_TOKEN).optional(),
 });
 export type AccessTokenScopes = z.infer<typeof ScopesSchema>;
 
 /**
- * The Zod input schema. Shape: `{ name, scopes, expiresAt?, ownerScopeConfirm? }`.
- * Superrefine enforces S-1 (owner scope requires explicit confirmation).
+ * The Zod input schema. Shape: `{ name, scopes, expiresAt?, ownerScopeConfirm?, experimentalToolsConfirm? }`.
+ * Superrefine enforces:
+ *   - S-1 (sub-chunk 7.1): owner scope requires `ownerScopeConfirm=true`.
+ *   - H-4 (sub-chunk 7.5): any non-empty `scopes.tools` requires
+ *     `experimentalToolsConfirm=true`. Experimental grants are destructive
+ *     per CLAUDE.md §6 — must be explicit, not a side-effect.
  * Refines enforce S-3 (no backdated) + S-2 (<=1y max).
+ * `.strict()` enforces security C-1: unknown top-level keys (notably
+ * adversarial `tenantId` / `userId`) are rejected at parse time — the HTTP
+ * path can never slip a tenant-id shadow in through the body.
  */
 export const CreateAccessTokenInputSchema = z
   .object({
@@ -72,13 +91,27 @@ export const CreateAccessTokenInputSchema = z
       })
       .optional(),
     ownerScopeConfirm: z.literal(true).optional(),
+    experimentalToolsConfirm: z.literal(true).optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     if (data.scopes.role === "owner" && data.ownerScopeConfirm !== true) { // role-lint: input-scopes-role-ok
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["ownerScopeConfirm"],
         message: "minting an owner-scoped PAT requires ownerScopeConfirm=true",
+      });
+    }
+    if (
+      data.scopes.tools !== undefined &&
+      data.scopes.tools.length > 0 &&
+      data.experimentalToolsConfirm !== true
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["experimentalToolsConfirm"],
+        message:
+          "minting a PAT with experimental tool grants requires experimentalToolsConfirm=true",
       });
     }
   });

@@ -33,7 +33,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import type { McpRequestContext } from "../context";
 import { McpError } from "../errors";
 import type { Tx } from "@/server/db";
@@ -66,11 +66,6 @@ interface RegisteredTool {
   audit: ToolAuditConfig;
 }
 
-// Narrow type for the JSON-Schema fragment we emit in tools/list. We do
-// NOT compile Zod → JSON Schema here (not a 7.2 concern) — we emit a
-// generic `{ type: "object" }` shape and rely on `.strict()` at the
-// call-time parse to police the real contract.
-//
 // Audit mode is declared at the registry (not on the tool itself) so
 // auditing policy is one-grep visible. `ping` is a read → "none"; 7.3's
 // `create_product` will register with "mutation".
@@ -91,6 +86,20 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   },
 ];
 
+// Zod 4 ships a built-in `z.toJSONSchema` that emits JSON Schema 2020-12.
+// We strip the top-level `$schema` draft marker since MCP's `tools/list`
+// expects a plain Tool object, not a standalone JSON Schema document —
+// the draft URI on a nested fragment confuses some downstream clients
+// and adds noise on the wire.
+function zodToJsonSchema(input: ZodType<unknown>): Record<string, unknown> {
+  const compiled = z.toJSONSchema(input) as Record<string, unknown>;
+  if ("$schema" in compiled) {
+    const { $schema: _omit, ...rest } = compiled;
+    return rest;
+  }
+  return compiled;
+}
+
 export function registerTools(
   server: Server,
   ctx: McpRequestContext,
@@ -101,11 +110,16 @@ export function registerTools(
       tools: visible.map(({ tool }) => ({
         name: tool.name,
         description: tool.description,
-        // Minimal JSON Schema shape — real validation lives in the Zod
-        // parse at call time. See the block-5 tests: the JSON-RPC wire
-        // shape is observable; the strict-schema contract is enforced
-        // server-side regardless of what we advertise.
-        inputSchema: { type: "object" as const },
+        // Compile the tool's Zod input schema to JSON Schema so MCP
+        // clients (Claude Desktop, Claude Code) can introspect parameter
+        // shapes. `.strict()` at the tool boundary flows through as
+        // `additionalProperties: false` — tool authors MUST keep using
+        // `.strict()` on every tool's `inputSchema` so hostile extra
+        // keys advertised-away AND runtime-rejected in one place.
+        // Authorization runs BEFORE this via `isVisibleFor(ctx)` above;
+        // anonymous callers never see the schema (the HTTP route 401s
+        // them first).
+        inputSchema: zodToJsonSchema(tool.inputSchema),
       })),
     };
   });

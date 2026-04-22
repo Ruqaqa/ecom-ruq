@@ -53,10 +53,14 @@ const DEV_TENANT_HOST = "localhost:5001";
 
 export const OWNER_EMAIL = "admin-owner@test.local";
 export const CUSTOMER_EMAIL = "customer@test.local";
+// Staff fixture added in sub-chunk 7.5 so the admin PAT-management UI
+// can assert the staff-role view (list visible, create/revoke hidden).
+export const STAFF_EMAIL = "admin-staff@test.local";
 export const FIXTURE_PASSWORD = "CorrectHorseBatteryStaple-9183";
 
 export async function seedAdminUser(): Promise<{
   ownerId: string;
+  staffId: string;
   customerId: string;
   tenantId: string;
 }> {
@@ -79,6 +83,11 @@ export async function seedAdminUser(): Promise<{
       OWNER_EMAIL,
       passwordHash,
     );
+    const staffId = await upsertUserWithPassword(
+      sql,
+      STAFF_EMAIL,
+      passwordHash,
+    );
     const customerId = await upsertUserWithPassword(
       sql,
       CUSTOMER_EMAIL,
@@ -91,6 +100,12 @@ export async function seedAdminUser(): Promise<{
       VALUES (${randomUUID()}, ${tenantId}::uuid, ${ownerId}::uuid, 'owner', now())
       ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = 'owner'
     `;
+    // Staff membership for the read-only-PAT-list coverage (sub-chunk 7.5).
+    await sql`
+      INSERT INTO memberships (id, tenant_id, user_id, role, created_at)
+      VALUES (${randomUUID()}, ${tenantId}::uuid, ${staffId}::uuid, 'staff', now())
+      ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = 'staff'
+    `;
 
     // Defensive: a prior run that created a customer membership row
     // shouldn't linger. Remove one if it exists. (We don't rely on
@@ -101,7 +116,7 @@ export async function seedAdminUser(): Promise<{
       DELETE FROM memberships WHERE tenant_id = ${tenantId}::uuid AND user_id = ${customerId}::uuid
     `;
 
-    return { ownerId, customerId, tenantId };
+    return { ownerId, staffId, customerId, tenantId };
   } finally {
     await sql.end({ timeout: 5 });
   }
@@ -166,9 +181,9 @@ const runFromCli =
 
 if (runFromCli) {
   seedAdminUser()
-    .then(({ ownerId, customerId, tenantId }) => {
+    .then(({ ownerId, staffId, customerId, tenantId }) => {
       console.log(
-        `Seeded admin fixtures: owner=${ownerId} customer=${customerId} tenant=${tenantId}`,
+        `Seeded admin fixtures: owner=${ownerId} staff=${staffId} customer=${customerId} tenant=${tenantId}`,
       );
     })
     .catch((err) => {
