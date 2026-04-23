@@ -35,6 +35,10 @@
 import { APIError } from "better-auth/api";
 import { checkRateLimit } from "./rate-limit";
 import { writeAuditInOwnTx } from "@/server/audit/write";
+import {
+  assertProxyHeaderPresent,
+  ProductionGuardError,
+} from "@/server/boot/production-guards";
 
 interface AuthLimitPolicy {
   /** Requests per IP within ipWindow seconds. */
@@ -185,6 +189,22 @@ export interface EnforceResult {
  * Throws `APIError('SERVICE_UNAVAILABLE')` on Redis outage — fail-closed.
  */
 export async function enforceAuthRateLimit(input: EnforceInput): Promise<EnforceResult> {
+  // Chunk 10 proxy-header guard — in real production, require x-real-ip.
+  // The /api/auth/* routes are excluded from the Next.js middleware matcher,
+  // and this is the critical consumer of x-real-ip (per-IP bucket key).
+  // In dev / e2e, `isRealProduction()` returns false and this is a no-op.
+  try {
+    assertProxyHeaderPresent(input.headers);
+  } catch (err) {
+    if (err instanceof ProductionGuardError) {
+      throw new APIError("SERVICE_UNAVAILABLE", {
+        message: "Reverse proxy did not set x-real-ip.",
+        code: "PROXY_HEADER_MISSING",
+      });
+    }
+    throw err;
+  }
+
   const policy = AUTH_LIMITS[input.path];
   if (!policy) return { allowed: true };
 

@@ -71,10 +71,16 @@ function mapBAErrorToAuditCode(err: {
 // We need to build our own Drizzle client here because BA's drizzle adapter
 // expects the *original* drizzle client (not the lazy Nullable appDb). Also
 // the one we pass here owns the auth table writes, which we deliberately
-// run with superuser privileges during sign-up (BA needs to INSERT into
+// run with privileged role during sign-up (BA needs to INSERT into
 // `user`, `account`, `verification`, `session`). In staging/prod, that
-// privilege is held by `app_migrator`-equivalent or a dedicated BA role.
-const databaseUrl = process.env.DATABASE_URL_APP ?? process.env.DATABASE_URL;
+// privilege is held by a dedicated BA role (NOT `app_user`, which is
+// RLS-bound and would silently filter BA's writes — chunk 10 boot guard
+// `assertBetterAuthDbRoleSafe` refuses to start if this URL uses app_user).
+// Preference order: DATABASE_URL_BA → DATABASE_URL_APP → DATABASE_URL.
+const databaseUrl =
+  process.env.DATABASE_URL_BA ??
+  process.env.DATABASE_URL_APP ??
+  process.env.DATABASE_URL;
 const baClient = databaseUrl ? postgres(databaseUrl, { max: 4 }) : null;
 const baDb = baClient ? drizzle(baClient, { schema }) : null;
 
