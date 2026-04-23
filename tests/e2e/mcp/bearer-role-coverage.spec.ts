@@ -39,6 +39,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { OWNER_EMAIL, FIXTURE_PASSWORD } from "../../../scripts/seed-admin-user";
+import { testTokenName } from "../helpers/test-token-name";
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -53,10 +54,6 @@ const TENANT_DOMAIN = "localhost:5001";
  * retains the full matrix because it exercises UI in both locales.
  */
 const PURE_HTTP_PROJECT = "desktop-chromium-en";
-
-function unique(tag: string): string {
-  return `${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-}
 
 const expected = {
   en: {
@@ -188,7 +185,7 @@ for (const locale of ["en", "ar"] as const) {
     test.setTimeout(60_000);
     await signIn(page, locale, OWNER_EMAIL);
 
-    const name = unique(`bearer-coverage-owner-${locale}`);
+    const name = testTokenName(`bearer-coverage-owner-${locale}`);
     const pat = await mintPatViaAdminUi(page, locale, name, "owner");
 
     const list = await mcpCall(request, pat, {
@@ -217,7 +214,7 @@ test("scenario 2: staff PAT — MCP tools/list includes create_product and tools
   );
   test.setTimeout(60_000);
   await signIn(page, "en", OWNER_EMAIL);
-  const name = unique("bearer-coverage-staff");
+  const name = testTokenName("bearer-coverage-staff");
   const pat = await mintPatViaAdminUi(page, "en", name, "staff");
 
   const list = await mcpCall(request, pat, {
@@ -263,7 +260,7 @@ test("scenario 3: support PAT — MCP tools/list HIDES create_product and tools/
   );
   test.setTimeout(60_000);
   await signIn(page, "en", OWNER_EMAIL);
-  const name = unique("bearer-coverage-support");
+  const name = testTokenName("bearer-coverage-support");
   const pat = await mintPatViaAdminUi(page, "en", name, "support");
 
   const list = await mcpCall(request, pat, {
@@ -371,7 +368,7 @@ test("scenario 4: bearer owner → tokens.create → 403 'session required for t
   );
   test.setTimeout(90_000);
   await signIn(page, "en", OWNER_EMAIL);
-  const name = unique("bearer-tokens-create");
+  const name = testTokenName("bearer-tokens-create");
   const pat = await mintPatViaAdminUi(page, "en", name, "owner");
 
   const sinceTs = await readAuditTail(TENANT_DOMAIN);
@@ -383,7 +380,7 @@ test("scenario 4: bearer owner → tokens.create → 403 'session required for t
     },
     data: {
       json: {
-        name: unique("bearer-attempt"),
+        name: testTokenName("bearer-attempt"),
         scopes: { role: "staff" },
       },
     },
@@ -440,7 +437,7 @@ test("scenario 5: bearer owner → tokens.list → 403 'session required for thi
   );
   test.setTimeout(90_000);
   await signIn(page, "en", OWNER_EMAIL);
-  const name = unique("bearer-tokens-list");
+  const name = testTokenName("bearer-tokens-list");
   const pat = await mintPatViaAdminUi(page, "en", name, "owner");
 
   const sinceTs = await readAuditTail(TENANT_DOMAIN);

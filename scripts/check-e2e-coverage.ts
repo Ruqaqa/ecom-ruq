@@ -345,6 +345,48 @@ async function checkNoRawAccessTokenDeletes(): Promise<string[]> {
   return violations;
 }
 
+/**
+ * Every Playwright access-token mint must flow through
+ * `testTokenName` so global-setup's `TTT-%` cleanup sweep catches it.
+ *
+ * Enforced for `.spec.ts` files under `tests/e2e/admin/tokens/` and
+ * `tests/e2e/mcp/` (the directories that create PATs today):
+ *   - file MUST import `testTokenName` from the shared helper;
+ *   - file MUST NOT define a local `function unique(` (old pattern —
+ *     direct replacement risk for a non-prefixed token name).
+ * If a future directory grows token-creating specs, extend the
+ * `TOKEN_SPEC_DIRS` list below in the same commit as the spec.
+ */
+const TOKEN_SPEC_DIRS = [
+  path.join(E2E_DIR, "admin", "tokens"),
+  path.join(E2E_DIR, "mcp"),
+];
+
+async function checkTestTokenNamePrefix(): Promise<string[]> {
+  const violations: string[] = [];
+  for (const dir of TOKEN_SPEC_DIRS) {
+    const files = (await walk(dir)).filter((f) => f.endsWith(".spec.ts"));
+    for (const file of files) {
+      const src = await readFile(file, "utf8");
+      if (!/from\s+["'][^"']*helpers\/test-token-name["']/.test(src)) {
+        violations.push(
+          `${file}: must \`import { testTokenName } from ".../helpers/test-token-name"\``,
+        );
+      }
+      for (const line of src.split("\n")) {
+        const trimmed = line.trimStart();
+        if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+        if (/\bfunction\s+unique\s*\(/.test(line)) {
+          violations.push(
+            `${file}: local \`function unique(\` is banned here — use testTokenName from the shared helper`,
+          );
+        }
+      }
+    }
+  }
+  return violations;
+}
+
 async function main() {
   const appDirExists = await stat(APP_DIR).then(() => true).catch(() => false);
   if (!appDirExists) {
@@ -376,13 +418,22 @@ async function main() {
     process.exit(2);
   }
 
-  const [routes, mutations, haystack, publicMutationViolations, authAfterViolations, rawDeleteViolations] = await Promise.all([
+  const [
+    routes,
+    mutations,
+    haystack,
+    publicMutationViolations,
+    authAfterViolations,
+    rawDeleteViolations,
+    tokenPrefixViolations,
+  ] = await Promise.all([
     collectRoutes(),
     collectTrpcMutations(),
     loadAllE2ESources(),
     checkNoPublicMutations(),
     checkAuthAuditAfterShape(),
     checkNoRawAccessTokenDeletes(),
+    checkTestTokenNamePrefix(),
   ]);
 
   if (authAfterViolations.length > 0) {
@@ -404,6 +455,14 @@ async function main() {
       "Raw .delete(accessTokens) is forbidden. Use soft-revoke via revokeAccessToken service (sub-chunk 7.1 S-10):",
     );
     for (const v of rawDeleteViolations) console.error(`  ${v}`);
+    process.exit(1);
+  }
+
+  if (tokenPrefixViolations.length > 0) {
+    console.error(
+      "Playwright access-token names must use testTokenName (see tests/e2e/helpers/test-token-name.ts):",
+    );
+    for (const v of tokenPrefixViolations) console.error(`  ${v}`);
     process.exit(1);
   }
 

@@ -22,6 +22,7 @@ import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import postgres from "postgres";
 import Redis from "ioredis";
 import { expectAxeClean } from "../../helpers/axe";
+import { testTokenName } from "../../helpers/test-token-name";
 import {
   OWNER_EMAIL,
   STAFF_EMAIL,
@@ -120,10 +121,6 @@ const expected = {
     expiresRowPrefix: "تاريخ الانتهاء:",
   },
 } as const;
-
-function unique(tag: string): string {
-  return `${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-}
 
 async function signIn(page: Page, locale: "en" | "ar", email: string): Promise<void> {
   await page.goto(`/${locale}/signin`);
@@ -237,7 +234,7 @@ for (const locale of ["en", "ar"] as const) {
     // Axe-clean on the expanded create form.
     await expectAxeClean(page);
 
-    const tokenName = unique(`claude-desktop-${locale}`);
+    const tokenName = testTokenName(`claude-desktop-${locale}`);
     await page.getByLabel(expected[locale].nameLabel, { exact: true }).fill(tokenName);
 
     // Pick 90-day expiry.
@@ -371,7 +368,7 @@ test("revoke dialog: Cancel / ESC / backdrop-click do not fire the mutation", as
   });
 
   // Seed a token so there's something to revoke.
-  const seedName = unique("revoke-seed");
+  const seedName = testTokenName("revoke-seed");
   await page.getByRole("button", { name: expected.en.newButton }).click();
   await page.getByLabel(expected.en.nameLabel, { exact: true }).fill(seedName);
   await page.getByRole("button", { name: expected.en.submitCreate }).click();
@@ -436,7 +433,7 @@ test("HTTP-path adversarial tenantId tampering rejected with unrecognized-keys Z
   const cookies = await page.context().cookies();
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 
-  const tokenName = unique("adv-tenantid");
+  const tokenName = testTokenName("adv-tenantid");
   // tRPC v11 accepts `{ json, meta }` with superjson; but a direct POST
   // with a JSON body is how an attacker would craft this. We bypass
   // the superjson wrapper and rely on Zod's `.strict()` to reject the
@@ -526,7 +523,7 @@ test("touch targets — copy / ack / revoke / submit are ≥ 44×44 on mobile", 
   expect(newBox?.width ?? 0).toBeGreaterThanOrEqual(44);
 
   await newButton.click();
-  const tokenName = unique("touch-target");
+  const tokenName = testTokenName("touch-target");
   await page.getByLabel(expected.en.nameLabel, { exact: true }).fill(tokenName);
   const submit = page.getByRole("button", { name: expected.en.submitCreate });
   const submitBox = await submit.boundingBox();
@@ -575,7 +572,7 @@ test("experimental tools confirm required — unchecked = field error; checked =
   await page.goto(`/en/admin/tokens`);
   await page.getByRole("button", { name: expected.en.newButton }).click();
 
-  const tokenName = unique("exp-tool");
+  const tokenName = testTokenName("exp-tool");
   await page.getByLabel(expected.en.nameLabel, { exact: true }).fill(tokenName);
 
   // Open the experimental disclosure.

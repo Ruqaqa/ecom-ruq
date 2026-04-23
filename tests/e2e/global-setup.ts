@@ -18,12 +18,35 @@
  */
 import { request as playwrightRequest } from "@playwright/test";
 import Redis from "ioredis";
+import postgres from "postgres";
 import { seedDevTenant } from "../../scripts/seed-dev-tenant";
 import { seedAdminUser } from "../../scripts/seed-admin-user";
+import { TEST_TOKEN_PREFIX } from "./helpers/test-token-name";
 
 export default async function globalSetup(): Promise<void> {
-  await seedDevTenant();
+  const { id: devTenantId } = await seedDevTenant();
   await seedAdminUser();
+
+  // Sweep access_tokens named with the shared test-prefix in the dev
+  // tenant. Prior runs crash-exit, are Ctrl-C'd, or simply do not clean
+  // up after themselves — the rows accumulate and pollute
+  // /{locale}/admin/tokens for the human operator. Manually-minted
+  // tokens (e.g. the one powering Claude Desktop) deliberately do NOT
+  // use this prefix and survive the sweep. See
+  // tests/e2e/helpers/test-token-name.ts for the prefix contract.
+  const databaseUrl =
+    process.env.DATABASE_URL ??
+    "postgresql://postgres:postgres@localhost:55432/ecom_ruq_dev";
+  const sql = postgres(databaseUrl, { max: 1 });
+  try {
+    await sql`
+      DELETE FROM access_tokens
+      WHERE tenant_id = ${devTenantId}
+        AND name LIKE ${TEST_TOKEN_PREFIX + "%"}
+    `;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 
   const mailpitBase = process.env.MAILPIT_URL ?? "http://localhost:58025";
   const ctx = await playwrightRequest.newContext({ baseURL: mailpitBase });
