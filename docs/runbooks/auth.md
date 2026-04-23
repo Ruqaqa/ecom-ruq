@@ -360,3 +360,292 @@ Querying by correlation_id reaches the consume+session pair; joining
 via actor_id reaches all four. Phase 4 MCP-query authors hitting the
 audit log via `search_audit_log` should pick the join strategy
 accordingly.
+
+---
+
+## Chunk 7.6.1 — pre-auth database scope (`withPreAuthTenant`)
+
+Before 7.6.1, three queries on the authentication path ran against
+`appDb` without setting the `app.tenant_id` GUC first:
+`lookupBearerToken` (token + membership resolve), `resolveMembership`
+(session role lookup), and `bumpLastUsedAt` (post-call debounced
+UPDATE). This worked in dev because `DATABASE_URL_APP` points at the
+`postgres` superuser which is RLS-exempt. In a production `app_user`
+deployment the RLS predicate `tenant_id = nullif(current_setting(
+'app.tenant_id', true), '')::uuid` sees NULL and filters every row —
+every bearer authentication would silently return null and every
+admin would be treated as a customer.
+
+`withTenant(db, ctx, fn)` cannot be reused at these callsites because
+it takes a branded `AuthedTenantContext` and constructing one
+presupposes the user is already authenticated — which is what these
+three callsites are trying to do.
+
+Fix: a sibling helper `withPreAuthTenant(db, tenantId, fn)` in
+`src/server/db/index.ts`. Same round-trip verify as `withTenant`
+(SET LOCAL + read back + throw on mismatch), same shared flat-only
+nesting guard (both helpers read/write the same `activeTenantStorage`).
+Takes a raw validated tenantId string, restricted to four blessed
+files via an AST-walk invariant (R-4) in
+`scripts/check-role-invariants.ts`.
+
+**R-4 enforcement.** The lint greps `src/` for the literal
+`withPreAuthTenant` (with the comment-stripper applied) and fails on
+any occurrence outside: the definition file (`db/index.ts`), the
+three callsites (`bearer-lookup.ts`, `membership.ts`,
+`last-used-debounce.ts`). Dynamic imports and re-export laundering
+are both closed by the single-rule grep. Run `pnpm
+check:role-invariants` — success output is
+`"role-invariants lint: clean (R-1, R-2, R-3, R-4)"`.
+
+**`bumpLastUsedAt` is post-auth, not pre-auth.** It runs inside the
+MCP adapter AFTER `resolveMcpIdentity` has validated the bearer and
+the adapter has built an `AuthedTenantContext`. So it uses
+`withTenant(authedCtx, …)` at the caller in
+`src/server/mcp/audit-adapter.ts`, not `withPreAuthTenant`. The
+signature is `bumpLastUsedAt(tx: Tx, tokenId, tenantId)` — the
+wrapping scope is owned at the caller. Structural honesty: a post-auth
+caller using the pre-auth helper would be a misleading invariant
+rot-vector.
+
+**Throw messages are verbatim-no-PII:**
+- `"withPreAuthTenant: invalid tenantId"` (UUID validation)
+- `"withPreAuthTenant: failed to set app.tenant_id GUC"` (round-trip mismatch)
+- `"withPreAuthTenant: already inside a tenant-scoped transaction; pre-auth helper cannot nest."` (flat-only guard)
+
+The pre-existing `withTenant` flat-only throw at `db/index.ts:68`
+still embeds the outer tenantId in the message
+(`"withTenant is flat-only; already inside a withTenant scope for
+tenant ${outer}"`). Not a 7.6.1 regression but flagged for chunk 9's
+observability pass so Sentry captures don't carry tenantId alongside
+a user identifier.
+
+**Tests run against the real `app_user` role.** Every RLS-gate test
+opens its own Postgres connection and does `SET LOCAL ROLE app_user`
+inside the tx — NOT the superuser override path via
+`__setBearerLookupDbForTests`. That override path masks the exact
+pathology we're fixing. Each test file also has a red-gate-keeper
+test that stays green post-fix and fires if anyone ever unwinds the
+wrap (same pattern mirrored at `membership-rls.test.ts` and
+`audit-adapter-last-used.test.ts`).
+
+**Better Auth's own `baDb` pool** (`auth-server.ts`) currently
+connects at superuser-equivalent in prod. If that is ever repointed
+at `app_user`, BA's writes to `user`/`session`/`account`/
+`verification` would hit RLS and fail. Flagged for chunk 9 CI env-lint.
+
+---
+
+## Chunk 7.6.2 — `requireRole` middleware + session-only token management
+
+`requireMembership` is deleted. Every tRPC callsite now gates through
+`requireRole({ roles, identity })` in
+`src/server/trpc/middleware/require-role.ts`. Four production
+callsites (three `tokens.*` + `products.create`) migrated in one PR.
+No backwards-compatibility alias.
+
+### Middleware shape
+
+```ts
+requireRole({
+  roles: readonly Role[],
+  identity?: 'session' | 'any'   // default 'any'
+})
+```
+
+Runtime behavior:
+
+1. Anonymous → UNAUTHORIZED `"authentication required"` (delegates to
+   `requireSession` internally — don't duplicate the anonymous branch).
+2. `identity === 'session'` AND caller is `bearer` → FORBIDDEN
+   `"session required for this action"`.
+3. `deriveRole(ctx)` not in `roles` → FORBIDDEN `"insufficient role"`.
+4. All pass → narrow `ctx.membership` non-null (for session callers)
+   and pass through to downstream middleware.
+
+**Why `deriveRole(ctx)` and not `ctx.membership?.role`.** Closes the
+S-5 pre-demotion blind spot — see next section.
+
+**Load-bearing string literals.** The two failure messages must stay
+as raw string literals at the throw sites. NOT extracted to a `const`.
+NOT interpolated. NOT translated (not fed through next-intl). Forensic
+audit replay depends on byte-exact matching against historical rows.
+A "readability cleanup" that constantizes these is a silent forensic
+regression; refuse the PR.
+
+### Why bearer carries `effectiveRole` and session doesn't
+
+Session callers read their role fresh from `memberships` on every
+request (via `resolveMembership`). If the role changes — promotion,
+demotion, offboarding — the very next session request reflects the
+new value.
+
+Bearer callers can't do that safely. The PAT was minted at some
+earlier point with a scope that included a role (say `owner`). The
+user's membership row may have changed since — perhaps that user was
+demoted to `staff`. The PAT's stored scope still says `owner` but the
+caller's true capability is no longer `owner`.
+
+`lookupBearerToken` resolves this at read time by computing
+
+```
+effectiveRole = min(scopes.role, membership.role)
+```
+
+— the LESS-privileged of the scope-at-mint-time and the role-now.
+Missing membership row → the lookup fails closed (returns null, not a
+customer fallthrough).
+
+`deriveRole(ctx)` abstracts this: session branch returns
+`membership?.role`, bearer branch returns `identity.effectiveRole`.
+Callers never deal with the asymmetry directly.
+
+**The blind spot `requireRole` closes.** The old `requireMembership`
+read `ctx.membership?.role`. For a bearer caller whose S-5 demotion
+had fired, `identity.effectiveRole` was `staff` but `ctx.membership`
+(populated from the membership cache keyed on user_id) still said
+`owner`. The gate passed when it shouldn't have. `requireRole` reads
+through `deriveRole(ctx)`, which correctly uses `effectiveRole` for
+the bearer branch.
+
+The unit test that proves the closure
+(`tests/unit/trpc/middleware/require-role.test.ts:283`, case 8)
+constructs the fixture with the exact shape that discriminates the
+two implementations: `identity.effectiveRole === "staff"` AND
+`membership?.role === "owner"` simultaneously. A fixture-shape
+assertion on its own line verifies the shape before exercising the
+middleware. Do not simplify the test — if the fixture doesn't
+discriminate, the test passes against both the old and new
+implementations and proves nothing.
+
+### What `last_used_at` tells you (and what it doesn't)
+
+Updated via a debounced UPDATE at the end of every MCP tool call
+(every tool, not just mutations — see
+`src/server/mcp/audit-adapter.ts`). Debounce is Redis-gated:
+`shouldWriteLastUsedAt(tokenId)` returns true only if the last update
+was more than N seconds ago. Writes run inside the caller's
+`withTenant(authedCtx, …)` scope so RLS permits the UPDATE.
+
+**What it tells you:**
+- Roughly when a token was last used (within the debounce window).
+- Whether a token is actively in rotation vs dormant.
+
+**What it doesn't tell you:**
+- What the caller did — that's the audit log (join by token_id).
+- Where the caller called from — not recorded.
+- Whether the call succeeded or was refused — forbidden refusals
+  currently fire BEFORE the bump, so a stream of refusals does not
+  bump last_used_at. Combine with audit log for a complete picture.
+
+**Fail-open on bump failure.** If the bump UPDATE throws
+(connectivity, tx conflict), the caller's Sentry capture fires a
+`last_used_bump_failure` message and the original tool call still
+succeeds. Rationale: the bump is observability, not correctness;
+failing the tool call for an observability miss would be a worse
+trade than one stale timestamp.
+
+### Sentry-on-audit-write-failure — unified across both transports
+
+As of 7.6.1, both the tRPC adapter (`audit-wrap.ts`) and the MCP
+adapter (`audit-adapter.ts`) route audit-write failures and
+tenant-resolution-lost cases through the same Sentry capture pattern.
+Pre-7.6.1 the MCP side used `console.error`; that's gone.
+
+Capture keys to recognize in Sentry:
+- `audit_write_failure` — in-tx `insert_audit_in_tx` threw (tenant
+  advisory lock couldn't acquire, chain verify failed, etc.).
+- `tenant_resolution_lost_at_hook` — BA hook fired with null ctx or
+  null-tenant; audit-skip per Option B + Sentry alert. Suppressed
+  under `APP_ENV=seed`.
+- `last_used_bump_failure` — see above.
+
+All three exclude raw input (PDPL/Tier-B fields); structural facts
+only.
+
+### `tokens.*` routes are session-only
+
+All three token-management routes require `identity: 'session'`:
+- `tokens.create` — owner-only, session-only.
+- `tokens.revoke` — owner-only, session-only.
+- `tokens.list` — owner-only, session-only (double-tightened in
+  7.6.2 from the previous owner+staff posture).
+
+**Why.** A leaked bearer token should not be able to mint more
+tokens (persistence past rotation) or enumerate the PAT inventory
+(reconnaissance for high-value targets). Tying these operations to a
+live browser session means a compromised PAT cannot widen its own
+blast radius.
+
+**Staff viewing the tokens page.** Staff can still open
+`/admin/tokens` (the admin layout RSC gate accepts staff). The
+client-side component at `tokens-client.tsx` only issues
+`tokens.list.useQuery` when `viewerRole === 'owner'` and renders the
+i18n `admin.tokens.ownerOnlyNotice` string for non-owners. The
+client-side skip is UX only — the server-side gate in `requireRole`
+is the source of truth; a tampered prop that issues the query anyway
+still receives 403.
+
+**Forbidden-on-bearer audit shape.** A bearer calling
+`tokens.create` / `tokens.revoke` produces one audit row with
+`operation='tokens.<op>'`, `errorCode='forbidden'`,
+`actorType='user'`, `tokenId IS NOT NULL`. The NOT NULL clause is
+the critical invariant — it proves the bearer was correctly
+attributed BEFORE the refusal. A regression that moves refusal
+pre-audit loses forensic attribution. A bearer calling `tokens.list`
+produces NO audit row (reads don't audit per prd §3.7). Both cases
+return a bare FORBIDDEN envelope: the response body MUST NOT include
+`tokenPrefix`, `scopes`, `role`, or any PAT-list metadata. Playwright
+scenarios 4 and 5 in `tests/e2e/mcp/bearer-role-coverage.spec.ts`
+enforce this with body-leak assertions.
+
+### Service-layer role gates stay, intentionally
+
+`createAccessToken`, `revokeAccessToken`, and `listAccessTokens` all
+still check `role !== 'owner'` (list permits owner+staff) at the
+service-layer entry. These stay as defense-in-depth for non-tRPC
+callers (cron, internal jobs, future MCP tools if any ever expose
+`tokens.*`). `listAccessTokens` intentionally keeps the wider
+owner+staff gate at the service layer even though the tRPC adapter
+narrowed to owner-only — defense-in-depth does not narrow when the
+adapter gate narrows; it mirrors the widest possible caller.
+
+### Phase 7 migration target
+
+`requireRole({ roles })` → `requirePermission({ permissions })` when
+the custom RBAC system lands in Phase 7. Single grep-target: one
+helper file touched, callsites edit `roles: […]` → `permissions: […]`,
+PAT scopes become permission-set subsets. Per prd §3.6: "Phase 0–6
+code gates on role identity; the Phase 7 migration converts those
+gates to permission-identity checks. To keep that migration
+surgical, all role gates in Phase 0–6 must route through a single
+authorization helper — never inline." 7.6.2 delivers that helper.
+
+### Parallel-path question for MCP — deferred to 7.6.3 CP-review
+
+`requireRole` is tRPC-only. The MCP adapter's tools each own their
+own `authorize` + `isVisibleFor` hooks and read
+`ctx.identity.role` directly (not through `deriveRole(ctx)`). MCP
+identity is bearer-only by construction — the `identity: 'session'`
+constraint has no meaning there. So prd §3.6's "single authorization
+helper" wording is NOT literally true across both transports after
+7.6.2 lands.
+
+Two ways to resolve in 7.6.3 CP-review:
+- **Option A:** extract `requireWriteRole(ctx)` as the MCP peer of
+  `requireRole`. Each tool calls it instead of inlining the role check.
+- **Option B:** name the MCP tool `authorize` contract itself as the
+  per-transport single helper, and document that §3.6's "single
+  helper" applies per-transport rather than globally.
+
+Either is defensible. Pick one during 7.6.3 and codify in §3.6 +
+`mcp-server.md`.
+
+### Future `tokens.*` transports — re-evaluation required
+
+Any new transport that exposes `tokens.*` in Phase 1+ (webhook,
+admin-API, internal RPC) must re-evaluate session-only enforcement
+at the new transport gate. `requireRole({ identity: 'session' })`
+is tRPC-specific. The service-layer gate checks role but NOT identity
+type — that's an adapter concern by architecture decision. 7.6.3
+CP-review + chunk 9 CI env-lint log this as a recurring checkpoint.
