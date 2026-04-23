@@ -2,7 +2,7 @@
 /**
  * Role-channel grep lint (sub-chunk 7.2).
  *
- * Three rules, NO dev-escape-hatch, each throws non-zero on any violation:
+ * Four rules, NO dev-escape-hatch, each throws non-zero on any violation:
  *
  *   R-1: `scopes.role` must not appear in service or router code — role
  *        is a ctx-derived value, NEVER a read from scopes-on-input. The
@@ -20,6 +20,12 @@
  *        src/server/auth/resolve-request-identity.ts. Any other hit is a
  *        violation (reading the field elsewhere would bypass deriveRole).
  *
+ *   R-4: `withPreAuthTenant` is allowed ONLY in src/server/db/index.ts
+ *        (definition) and the three pre-auth callsites:
+ *        src/server/auth/bearer-lookup.ts, src/server/auth/membership.ts,
+ *        src/server/auth/last-used-debounce.ts. Closes dynamic-import
+ *        and re-export laundering in one grep.
+ *
  * Comment-line handling: all three rules skip lines whose trimmed form
  * starts with `//` or `*` (JSDoc / inline-comment chatter mentions these
  * identifiers legitimately). That's why the marker must be a TRAILING
@@ -34,7 +40,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface RoleInvariantViolation {
-  rule: "R-1" | "R-2" | "R-3";
+  rule: "R-1" | "R-2" | "R-3" | "R-4";
   file: string;
   line: number;
   snippet: string;
@@ -67,7 +73,7 @@ function isCommentLine(trimmed: string): boolean {
 }
 
 async function scanRule(
-  rule: "R-1" | "R-2" | "R-3",
+  rule: RoleInvariantViolation["rule"],
   files: string[],
   pattern: RegExp,
   isAllowed: (file: string, line: string) => boolean,
@@ -143,7 +149,26 @@ export async function checkRoleInvariants(
     (file) => r3AllowedFiles.has(path.resolve(file)),
   );
 
-  return [...r1, ...r2, ...r3];
+  // R-4: withPreAuthTenant may only appear in the definition file or
+  // in the three pre-auth callsites. Closes dynamic-import evasion and
+  // re-export laundering in one grep because any surface that names
+  // the symbol is caught.
+  const r4AllowedFiles = new Set(
+    [
+      path.join(serverDir, "db", "index.ts"),
+      path.join(serverDir, "auth", "bearer-lookup.ts"),
+      path.join(serverDir, "auth", "membership.ts"),
+      path.join(serverDir, "auth", "last-used-debounce.ts"),
+    ].map((p) => path.resolve(p)),
+  );
+  const r4 = await scanRule(
+    "R-4",
+    serverFiles,
+    /\bwithPreAuthTenant\b/,
+    (file) => r4AllowedFiles.has(path.resolve(file)),
+  );
+
+  return [...r1, ...r2, ...r3, ...r4];
 }
 
 export function reportViolations(violations: RoleInvariantViolation[]): void {
@@ -166,7 +191,7 @@ if (isDirectRun) {
     .then((violations) => {
       reportViolations(violations);
       if (violations.length > 0) process.exit(1);
-      console.log("role-invariants lint: clean (R-1, R-2, R-3).");
+      console.log("role-invariants lint: clean (R-1, R-2, R-3, R-4).");
     })
     .catch((err) => {
       console.error(err);

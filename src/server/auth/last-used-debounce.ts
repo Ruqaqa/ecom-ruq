@@ -1,5 +1,6 @@
 /**
- * `last_used_at` bump debounce — sub-chunk 7.2 Part C.
+ * `last_used_at` bump debounce — sub-chunk 7.2 Part C, refactored in
+ * 7.6.1 Block D.
  *
  * `access_tokens.last_used_at` powers the "is this PAT in active use?"
  * UI signal. Naively writing it on every MCP / tRPC call would cost one
@@ -13,13 +14,16 @@
  *     down, transient timeout) return false — the bump is skipped,
  *     the request still proceeds. Security comes from the token lookup,
  *     not from the bump.
- *   - bumpLastUsedAt: tenant-scoped UPDATE with an `eq(tenantId)`
- *     predicate (defense-in-depth on top of RLS). Errors captured via
- *     Sentry shim but swallowed — same fail-open posture.
+ *   - bumpLastUsedAt receives an already-opened `Tx`; the caller owns
+ *     the `withTenant` scope so `app.tenant_id` is set before the
+ *     UPDATE fires (otherwise RLS filters the row out under
+ *     `app_user`). The `eq(tenantId)` predicate stays as defense-in-
+ *     depth on top of RLS. Errors propagate — the caller swallows at
+ *     the audit-adapter layer (fail-open; debounce never gates).
  */
 import Redis from "ioredis";
 import { and, eq, sql } from "drizzle-orm";
-import { appDb } from "@/server/db";
+import type { Tx } from "@/server/db";
 import { accessTokens } from "@/server/db/schema/tokens";
 
 const DEBOUNCE_WINDOW_SECONDS = 60;
@@ -62,32 +66,19 @@ export async function shouldWriteLastUsedAt(tokenId: string): Promise<boolean> {
 
 /**
  * Update `last_used_at = now()` for the given token, scoped to the
- * tenant. The `eq(tenantId)` predicate is redundant under RLS but
- * belt-and-braces in case a future code path bypasses the GUC-backed
- * `app_user` pool. Errors are captured via the Sentry shim and
- * swallowed — this is best-effort.
+ * tenant. Must be called inside a `withTenant` scope so `app.tenant_id`
+ * is set for RLS. Errors propagate — the caller (audit adapter)
+ * swallows them to preserve the fail-open posture.
  */
 export async function bumpLastUsedAt(
+  tx: Tx,
   tokenId: string,
   tenantId: string,
 ): Promise<void> {
-  if (!appDb) return;
-  try {
-    await appDb
-      .update(accessTokens)
-      .set({ lastUsedAt: sql`now()` })
-      .where(
-        and(eq(accessTokens.id, tokenId), eq(accessTokens.tenantId, tenantId)),
-      );
-  } catch (err) {
-    const { captureMessage } = await import("@/server/obs/sentry");
-    captureMessage("last_used_bump_failure", {
-      level: "warning",
-      tags: {
-        tenant_id: tenantId,
-        token_id: tokenId,
-      },
-      extra: { cause: String(err) },
-    });
-  }
+  await tx
+    .update(accessTokens)
+    .set({ lastUsedAt: sql`now()` })
+    .where(
+      and(eq(accessTokens.id, tokenId), eq(accessTokens.tenantId, tenantId)),
+    );
 }

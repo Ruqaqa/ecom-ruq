@@ -30,7 +30,7 @@
 import type { McpRequestContext } from "./context";
 import type { McpTool } from "./tools/registry";
 import { mapErrorToAuditCode, inputForFailure } from "@/server/audit/adapter-wrap";
-import { appDb } from "@/server/db";
+import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
 import { runWithAudit } from "@/server/audit/run-with-audit";
 import { writeAuditInOwnTx } from "@/server/audit/write";
@@ -186,14 +186,39 @@ export async function dispatchTool<TIn, TOut>(
   }
 
   // last_used_at debounce — every tool dispatch, success path only.
-  // Swallows errors internally (fail-open; debounce never gates).
-  if (ctx.identity.type === "bearer") {
+  // The UPDATE runs inside a `withTenant` scope so `app.tenant_id` is
+  // set for RLS (under `app_user`, without the GUC the UPDATE filters
+  // to zero rows — 7.6.1 Block D). Errors are swallowed here to
+  // preserve the fail-open posture: debounce never gates.
+  if (ctx.identity.type === "bearer" && appDb) {
     const tokenId = ctx.identity.tokenId;
     try {
       const should = await shouldWriteLastUsedAt(tokenId);
-      if (should) await bumpLastUsedAt(tokenId, ctx.tenant.id);
-    } catch {
+      if (should) {
+        const bumpCtx = buildAuthedTenantContext(
+          { id: ctx.tenant.id },
+          {
+            userId: actor.actorId,
+            actorType: actor.actorType,
+            tokenId: actor.tokenId,
+            role: ctx.identity.role,
+          },
+        );
+        await withTenant(appDb, bumpCtx, async (tx) =>
+          bumpLastUsedAt(tx, tokenId, ctx.tenant.id),
+        );
+      }
+    } catch (err) {
       // fail-open — debounce never gates.
+      const { captureMessage } = await import("@/server/obs/sentry");
+      captureMessage("last_used_bump_failure", {
+        level: "warning",
+        tags: {
+          tenant_id: ctx.tenant.id,
+          token_id: tokenId,
+        },
+        extra: { cause: String(err) },
+      });
     }
   }
 

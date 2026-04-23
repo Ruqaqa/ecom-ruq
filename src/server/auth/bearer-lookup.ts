@@ -36,7 +36,7 @@
  *   - enforce tool scopes (higher layers consume `scopes.tools`).
  */
 import { and, eq, isNull, or, gt, inArray } from "drizzle-orm";
-import { appDb } from "@/server/db";
+import { appDb, withPreAuthTenant } from "@/server/db";
 import { accessTokens } from "@/server/db/schema/tokens";
 import { memberships } from "@/server/db/schema/memberships";
 import type { AppDb } from "@/server/db";
@@ -112,37 +112,43 @@ export async function lookupBearerToken(
   const tokenHashes = hashBearerTokenAllPeppers(rawToken);
   const now = new Date();
 
-  const rows = await db
-    .select({
-      id: accessTokens.id,
-      userId: accessTokens.userId,
-      tenantId: accessTokens.tenantId,
-      name: accessTokens.name,
-      scopes: accessTokens.scopes,
-      tokenHash: accessTokens.tokenHash,
-      lastUsedAt: accessTokens.lastUsedAt,
-      expiresAt: accessTokens.expiresAt,
-      revokedAt: accessTokens.revokedAt,
-      createdAt: accessTokens.createdAt,
-      membershipRole: memberships.role,
-    })
-    .from(accessTokens)
-    .innerJoin(
-      memberships,
-      and(
-        eq(memberships.userId, accessTokens.userId),
-        eq(memberships.tenantId, accessTokens.tenantId),
-      ),
-    )
-    .where(
-      and(
-        eq(accessTokens.tenantId, tenantId),
-        inArray(accessTokens.tokenHash, tokenHashes),
-        isNull(accessTokens.revokedAt),
-        or(isNull(accessTokens.expiresAt), gt(accessTokens.expiresAt, now)),
-      ),
-    )
-    .limit(1);
+  // Pre-auth: set `app.tenant_id` GUC so RLS returns rows when the app
+  // connects as the non-superuser `app_user`. The explicit
+  // `eq(accessTokens.tenantId, tenantId)` predicate stays — defense in
+  // depth on top of RLS.
+  const rows = await withPreAuthTenant(db, tenantId, (tx) =>
+    tx
+      .select({
+        id: accessTokens.id,
+        userId: accessTokens.userId,
+        tenantId: accessTokens.tenantId,
+        name: accessTokens.name,
+        scopes: accessTokens.scopes,
+        tokenHash: accessTokens.tokenHash,
+        lastUsedAt: accessTokens.lastUsedAt,
+        expiresAt: accessTokens.expiresAt,
+        revokedAt: accessTokens.revokedAt,
+        createdAt: accessTokens.createdAt,
+        membershipRole: memberships.role,
+      })
+      .from(accessTokens)
+      .innerJoin(
+        memberships,
+        and(
+          eq(memberships.userId, accessTokens.userId),
+          eq(memberships.tenantId, accessTokens.tenantId),
+        ),
+      )
+      .where(
+        and(
+          eq(accessTokens.tenantId, tenantId),
+          inArray(accessTokens.tokenHash, tokenHashes),
+          isNull(accessTokens.revokedAt),
+          or(isNull(accessTokens.expiresAt), gt(accessTokens.expiresAt, now)),
+        ),
+      )
+      .limit(1),
+  );
 
   const row = rows[0];
   if (!row) return null;

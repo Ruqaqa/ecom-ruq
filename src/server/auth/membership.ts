@@ -12,11 +12,13 @@
  *
  * This module is the seam chunk 6's tRPC context and chunk 7's MCP
  * handlers call after `resolveRequestIdentity` resolves a userId. We
- * intentionally do NOT read `app.tenant_id` — the caller passes tenantId
- * explicitly so this works even before `withTenant` has set the GUC.
+ * enter a `withPreAuthTenant` scope so RLS returns rows under `app_user`
+ * — the caller passes `tenantId` explicitly because an
+ * `AuthedTenantContext` has not been constructed yet at this point in
+ * the pipeline.
  */
 import { and, eq } from "drizzle-orm";
-import { appDb } from "@/server/db";
+import { appDb, withPreAuthTenant } from "@/server/db";
 import { memberships } from "@/server/db/schema/memberships";
 import type { AppDb } from "@/server/db";
 
@@ -46,16 +48,18 @@ export async function resolveMembership(
   const db = getDb();
   if (!db) return null;
 
-  const rows = await db
-    .select({
-      id: memberships.id,
-      role: memberships.role,
-      userId: memberships.userId,
-      tenantId: memberships.tenantId,
-    })
-    .from(memberships)
-    .where(and(eq(memberships.userId, userId), eq(memberships.tenantId, tenantId)))
-    .limit(1);
+  const rows = await withPreAuthTenant(db, tenantId, (tx) =>
+    tx
+      .select({
+        id: memberships.id,
+        role: memberships.role,
+        userId: memberships.userId,
+        tenantId: memberships.tenantId,
+      })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.tenantId, tenantId)))
+      .limit(1),
+  );
 
   const row = rows[0];
   if (!row) return null;

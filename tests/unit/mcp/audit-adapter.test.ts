@@ -74,17 +74,17 @@ afterEach(() => {
 });
 
 describe("dispatchTool — read path (auditMode='none')", () => {
-  it("returns the parsed output on success without touching withTenant or audit writes", async () => {
+  it("returns the parsed output on success without touching withTenant or audit writes (no-bump window)", async () => {
     const dbMod = await import("@/server/db");
     const writeMod = await import("@/server/audit/write");
     const withTenantSpy = vi.spyOn(dbMod, "withTenant");
     const insertSpy = vi.spyOn(writeMod, "insertAuditInTx");
     const failSpy = vi.spyOn(writeMod, "writeAuditInOwnTx");
 
-    // Stub Redis so the debounce doesn't touch real Redis during unit test.
-    // `SET NX EX` returns null the second time; first call returns OK.
-    const setFn = vi.fn(() => "OK");
-    __setRedisForTests({ set: setFn } as never);
+    // Redis returns null → debounce says "already bumped this window",
+    // so `withTenant` is not opened for the last_used_at UPDATE either.
+    // With auditMode:"none" + skipped bump, `withTenant` is untouched.
+    __setRedisForTests({ set: vi.fn(() => null) } as never);
 
     const out = await dispatchTool(ctxBearer(), echoTool, { x: 7 }, { auditMode: "none" });
     expect(out).toEqual({ x: 7 });
@@ -140,7 +140,9 @@ describe("dispatchTool — read path (auditMode='none')", () => {
         return { x: input.x };
       },
     };
-    __setRedisForTests({ set: vi.fn(() => "OK") } as never);
+    // Redis returns null → bump short-circuits so this test asserts
+    // only the handler-seen `tx` value, not the bump path.
+    __setRedisForTests({ set: vi.fn(() => null) } as never);
     await dispatchTool(ctxBearer(), sensing, { x: 1 }, { auditMode: "none" });
     expect(seenTx).toBeNull();
   });

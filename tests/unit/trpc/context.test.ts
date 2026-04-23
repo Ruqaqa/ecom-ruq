@@ -53,8 +53,14 @@ function makeReq(host: string): Request {
 
 /**
  * Builds a minimal AppDb stand-in whose select().from().where().limit()
- * chain resolves to the rows passed in. resolveMembership is the only
- * consumer of this chain in the code under test.
+ * chain resolves to the rows passed in. `resolveMembership` wraps its
+ * select in `withPreAuthTenant` (7.6.1 Block C), which calls
+ * `db.transaction(fn)` and then `tx.execute(sql`SELECT
+ * set_config...`)` followed by `tx.execute(sql`SELECT
+ * current_setting...`)` before invoking the select. The stub fakes
+ * both executes so the GUC round-trip passes, and threads the select
+ * chain through the tx object so the select inside the callback
+ * resolves to the same rows.
  */
 function stubMembershipDb(rows: unknown[]): AppDb {
   const chain = {
@@ -62,7 +68,27 @@ function stubMembershipDb(rows: unknown[]): AppDb {
     where: () => chain,
     limit: () => Promise.resolve(rows),
   };
-  return { select: () => chain } as unknown as AppDb;
+  let executeCalls = 0;
+  const tx = {
+    select: () => chain,
+    execute: async () => {
+      executeCalls += 1;
+      // First call: SELECT set_config(...) — return "ok-ish"; value is
+      // ignored by the helper. Second call: SELECT current_setting(...)
+      // — must return a row whose `tenant` matches the tenantId we were
+      // given, else the round-trip verify throws.
+      if (executeCalls === 1) return [];
+      return [{ tenant: tenant.id }];
+    },
+  };
+  const transaction = async (fn: (txArg: unknown) => Promise<unknown>) => {
+    executeCalls = 0;
+    return fn(tx);
+  };
+  return {
+    select: () => chain,
+    transaction,
+  } as unknown as AppDb;
 }
 
 afterEach(() => {

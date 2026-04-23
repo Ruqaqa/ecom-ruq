@@ -85,4 +85,64 @@ export async function withTenant<T>(
   );
 }
 
+/**
+ * Pre-auth sibling of `withTenant` — sets `app.tenant_id` GUC for DB
+ * queries issued BEFORE a bearer token is verified (and therefore before
+ * an `AuthedTenantContext` can be constructed).
+ *
+ * CALLABLE ONLY FROM these three pre-auth sites:
+ *   - `src/server/auth/bearer-lookup.ts`   (PAT → access_tokens + memberships join)
+ *   - `src/server/auth/membership.ts`      (session cookie → memberships lookup)
+ *   - `src/server/auth/last-used-debounce.ts` (access_tokens.last_used_at bump)
+ *
+ * Any other callsite is rejected by the R-4 AST-walk invariant in
+ * `scripts/check-role-invariants.ts`. Do not route around it.
+ *
+ * Shares `activeTenantStorage` with `withTenant`, so a pre-auth scope
+ * AND a post-auth scope can never nest in either direction.
+ *
+ * `tenantId` is a raw string (the bearer path cannot yet prove the
+ * caller is authenticated for a branded-type factory). We UUID-validate
+ * before `SET LOCAL` and fail-closed on non-UUIDs.
+ */
+// Hex-with-hyphens UUID shape. Deliberately does NOT enforce RFC 4122
+// version/variant bits — synthetic IDs from test fixtures and future
+// non-v4 generators must still flow through. The goal is to block
+// obviously-invalid inputs (`""`, `"not-a-uuid"`) from reaching
+// `set_config`; Postgres itself rejects anything that is not a legal
+// UUID literal when the value is cast downstream.
+const UUID_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function withPreAuthTenant<T>(
+  db: AppDb,
+  tenantId: string,
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  if (!UUID_SHAPE.test(tenantId)) {
+    throw new Error("withPreAuthTenant: invalid tenantId");
+  }
+  const outer = activeTenantStorage.getStore();
+  if (outer !== undefined) {
+    throw new Error(
+      "withPreAuthTenant: already inside a tenant-scoped transaction; pre-auth helper cannot nest.",
+    );
+  }
+  return activeTenantStorage.run(tenantId, () =>
+    db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`);
+      const current = await tx.execute<{ tenant: string | null }>(
+        sql`SELECT current_setting('app.tenant_id', true) AS tenant`,
+      );
+      const row = Array.isArray(current)
+        ? current[0]
+        : (current as { rows?: Array<{ tenant: string | null }> }).rows?.[0];
+      if (!row || row.tenant !== tenantId) {
+        throw new Error("withPreAuthTenant: failed to set app.tenant_id GUC");
+      }
+      return await fn(tx);
+    }),
+  );
+}
+
 export { schema };

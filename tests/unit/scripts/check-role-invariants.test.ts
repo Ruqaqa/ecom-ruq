@@ -147,6 +147,66 @@ describe("check-role-invariants fixture scanner", () => {
     expect(v.file).toContain("src/server/services/bad/reader.ts");
     expect(v.snippet).toMatch(/identity\.effectiveRole/);
   });
+
+  it("5. R-4 allow — definition in src/server/db/index.ts and the three callsites are permitted", async () => {
+    fixture = await makeFixture({
+      "src/server/trpc/ctx-role.ts": BLESSED_CTX_ROLE,
+      "src/server/auth/resolve-request-identity.ts": BLESSED_RESOLVE,
+      "src/server/db/index.ts": `
+        export async function withPreAuthTenant() { /* def */ }
+      `,
+      "src/server/auth/bearer-lookup.ts": `
+        import { withPreAuthTenant } from "@/server/db";
+        export const lookup = () => withPreAuthTenant;
+      `,
+      "src/server/auth/membership.ts": `
+        import { withPreAuthTenant } from "@/server/db";
+        export const resolve = () => withPreAuthTenant;
+      `,
+      "src/server/auth/last-used-debounce.ts": `
+        import { withPreAuthTenant } from "@/server/db";
+        export const bump = () => withPreAuthTenant;
+      `,
+    });
+    const violations = await checkRoleInvariants({ root: fixture.root });
+    expect(violations).toEqual([]);
+  });
+
+  it("6. R-4 violation — withPreAuthTenant used from any non-allowlisted file", async () => {
+    fixture = await makeFixture({
+      "src/server/trpc/ctx-role.ts": BLESSED_CTX_ROLE,
+      "src/server/auth/resolve-request-identity.ts": BLESSED_RESOLVE,
+      "src/server/db/index.ts": `
+        export async function withPreAuthTenant() { /* def */ }
+      `,
+      "src/server/services/evil/bypass.ts": `
+        import { withPreAuthTenant } from "@/server/db";
+        export const evil = () => withPreAuthTenant;
+      `,
+    });
+    const violations = await checkRoleInvariants({ root: fixture.root });
+    // one R-4 for the import line, one for the usage line
+    const r4 = violations.filter((v) => v.rule === "R-4");
+    expect(r4.length).toBeGreaterThanOrEqual(1);
+    expect(r4[0]!.file).toContain("src/server/services/evil/bypass.ts");
+    expect(r4[0]!.snippet).toMatch(/withPreAuthTenant/);
+  });
+
+  it("7. R-4 comment-stripper — a code-word reference inside a // comment is ignored", async () => {
+    fixture = await makeFixture({
+      "src/server/trpc/ctx-role.ts": BLESSED_CTX_ROLE,
+      "src/server/auth/resolve-request-identity.ts": BLESSED_RESOLVE,
+      "src/server/db/index.ts": `
+        export async function withPreAuthTenant() { /* def */ }
+      `,
+      "src/server/services/safe/doc-only.ts": `
+        // See withPreAuthTenant (design note only; not actually imported)
+        export const safe = () => 1;
+      `,
+    });
+    const violations = await checkRoleInvariants({ root: fixture.root });
+    expect(violations.filter((v) => v.rule === "R-4")).toEqual([]);
+  });
 });
 
 describe("B-2 security watchout — marker stays on the scopes.role site", () => {

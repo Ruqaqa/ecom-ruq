@@ -23,8 +23,12 @@
  *      NO product inserted.
  *   4. Duplicate slug → JSON-RPC conflict (code -32006), failure audit
  *      row errorCode='conflict', second product NOT inserted.
- *   5. F-1 invariant — withTenant called exactly once on a successful
- *      create_product dispatch (parallel to tRPC F-1).
+ *   5. F-1 invariant — withTenant called exactly twice on a successful
+ *      create_product dispatch: once for the mutation+audit under
+ *      runWithAudit, once for the last_used_at bump (7.6.1 Block D).
+ *      Two distinct scopes — runWithAudit opens its own, the adapter
+ *      opens a second after dispatch returns (flat-only prevents
+ *      nesting, sequential is fine).
  *   6. F-8 invariant — JSON-RPC wire body on a failed mutation does
  *      NOT contain the PAT plaintext or its base64url tail.
  *
@@ -435,7 +439,7 @@ describe("MCP create_product integration", () => {
     expect(failureRow).toBeTruthy();
   });
 
-  it("case 5 — F-1 invariant: withTenant called exactly once per successful create_product dispatch", async () => {
+  it("case 5 — F-1 invariant: withTenant called exactly twice per successful create_product dispatch (mutation + last_used_at bump)", async () => {
     fakeRedis.clear();
     const dbMod = await import("@/server/db");
     const spy = vi.spyOn(dbMod, "withTenant");
@@ -448,7 +452,10 @@ describe("MCP create_product integration", () => {
       const res = await POST(mcpRequest(body, patOwner));
       expect(res.status).toBe(200);
       await res.text();
-      expect(spy).toHaveBeenCalledTimes(1);
+      // 7.6.1 Block D: last_used_at bump now opens its own withTenant
+      // scope (sequential, not nested) so the RLS GUC is set before the
+      // UPDATE fires under `app_user`. Call count is exactly 2.
+      expect(spy).toHaveBeenCalledTimes(2);
     } finally {
       spy.mockRestore();
     }
