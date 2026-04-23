@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current repository state
 
-Phase 0 is **partially complete** — chunks 1–5 landed to `main` on 2026-04-20. Chunks 6–9 remain.
+Phase 0 is **near close**. Chunks 1–7 have landed to `main` (most recent: chunk 7 tip `8a76688` on 2026-04-23, pushed). Three small chunks remain (9, 10, 11), all scoped small by the **2026-04-23 scope-split decision** documented in `prd.md` and reflected in the "Remaining" block below. Everything deployment-target-dependent (hosted CI pipeline, Coolify deploy webhook, Sentry DSN, Lighthouse enforcement, CDN, backups, uptime monitoring) moved out of Phase 0 and now lands as part of a new **Launch infrastructure** block at the top of Phase 1b in `prd.md`.
 
 **Landed (chunks 1–5):**
 - Next.js 15 shell, TypeScript strict, Tailwind v4, ESLint flat config, Prettier. Dev server runs on port **5001** (not 3000).
@@ -53,9 +53,28 @@ Phase 0 is **partially complete** — chunks 1–5 landed to `main` on 2026-04-2
 
 Tests at chunk 7 close: **391 vitest across 62 files + 298 Playwright passed / 20 skipped** + lint + typecheck + role-invariants (R-1/R-2/R-3/R-4) + e2e-coverage. All green on tip `8a76688`.
 
-**Remaining (chunk 9 + chunk 10):**
-- **Chunk 9** — GitHub Actions CI: lint → typecheck → vitest → playwright → lighthouse-ci → check-e2e-coverage → check-role-invariants, fails-closed. Coolify deploy webhook is a placeholder until Hetzner VM + Coolify exist. Security has pre-flagged: PgBouncer must be `pool_mode = transaction` or `session` (statement pooling breaks RLS). Chunk-6-sourced items: CI env-lint rejecting `APP_ENV=e2e|seed` / `E2E_AUTH_RATE_LIMIT_DISABLED=1` / `MCP_RUN_SQL_ENABLED=1` in Coolify env; request-time `proxy_header_missing` 503 refuse in prod when `x-real-ip` absent; wire closed-set `after` lint into CI; AST walk for `hooks.before` throws + inline-audit invariant. Chunk-7-sourced items: observability pass to sanitize tenantId / user-identifier embeds across all error paths (includes `withTenant` flat-only throw at `src/server/db/index.ts:68` embedding outer tenantId — carry-over 18 from 7.6.3, deferred here); `check:e2e-coverage` MCP-mutation extension (currently tRPC-only); BA `baDb` pool repoint hard-refuse boot check.
-- **Chunk 10** — Magic-link `audit_payloads` PK collision fix. When two or more magic-link consumes race at the same instant, the `audit_payloads` INSERT can collide on primary key and one write fails; the companion `audit_log` row still lands so forensics knows the event happened, but the detail row for the losing racer is lost. Pre-existing, intermittent, non-blocking; surfaces loudly in Playwright because the suite provokes parallel races. User explicitly deferred 2026-04-23 to AFTER chunk 9. Likely fix: tolerate the collision (retry once with a fresh id, or move to an insert-or-update with a monotonic suffix). Small scope; ~1 file touch plus a regression test that drives two simultaneous consumes against Mailpit and asserts both detail rows land.
+**Remaining Phase 0 work — three small chunks (scope-split 2026-04-23):**
+
+The original "chunk 9" was a hosted GitHub Actions CI pipeline + Coolify deploy webhook + Sentry wiring + Lighthouse enforcement — a single large chunk. On 2026-04-23 the owner and I deliberately split it because its deployment-target-dependent pieces have no Hetzner VM / Coolify instance to point at today and no second-developer pushes to guard. Those pieces (Hetzner VM, Coolify, GitHub Actions workflow, Coolify deploy webhook, Lighthouse CI enforcement, Sentry DSN, CDN, backups, uptime monitoring) moved to a new **Launch infrastructure** block at the top of Phase 1b in `prd.md` — they land as one coordinated pass before the public URL goes live. Only the pieces that are load-bearing today stayed inside Phase 0, plus the pre-existing magic-link race bug as its own chunk:
+
+- **Chunk 9 — Error-log scrubbing (observability prep, precedes Sentry wiring).** Sanitize tenantId + user-identifier embeds across every error path (messages, stack-frame extras, contextual metadata) so stdout/stderr never leak customer identifiers or tenant IDs. Includes the known `withTenant` flat-only throw at `src/server/db/index.ts:68` embedding outer tenantId (carry-over 18 from 7.6.3). Design intent: when Phase 1b wires a Sentry DSN, its `beforeSend` scrubber is a belt-and-braces last-mile safety net, not the only line of defense.
+- **Chunk 10 — Boot-time production-safety guards.** At `NODE_ENV=production`: refuse to start if `APP_ENV=e2e|seed`, `E2E_AUTH_RATE_LIMIT_DISABLED=1`, or `MCP_RUN_SQL_ENABLED=1` are set. Refuse on first request if the reverse-proxy is not setting `x-real-ip` (503 `proxy_header_missing`). Hard-refuse boot check that `DATABASE_URL_BA` never points at `app_user` (would silently filter Better Auth's writes under RLS). These guards live in the code now so the day the Hetzner VM is provisioned in Phase 1b they are already wired — no retrofit, no "I thought we had that."
+- **Chunk 11 — Magic-link `audit_payloads` PK collision fix.** When two or more magic-link consumes race at the same instant, the `audit_payloads` INSERT can collide on primary key and one write fails; the companion `audit_log` row still lands so forensics knows the event happened, but the detail row for the losing racer is lost. Pre-existing, intermittent, non-blocking today; surfaces loudly in Playwright because the suite provokes parallel races. User explicitly sequenced 2026-04-23 to come AFTER chunks 9+10. Likely fix: tolerate the collision (retry once with a fresh id, or insert-or-update with a monotonic suffix). Small scope; ~1 file touch plus a regression test that drives two simultaneous consumes against Mailpit and asserts both detail rows land. After this lands, Phase 0 is complete.
+
+**Moved out of Phase 0 (now part of Phase 1b Launch infrastructure — lands closer to first public launch):**
+- Hetzner Cloud VM + Coolify install + Coolify-managed Postgres/Redis/Meilisearch (parity with local Docker Compose stack)
+- GitHub Actions workflow, fails-closed: `lint → typecheck → vitest → playwright → lighthouse-ci → check-e2e-coverage → check-role-invariants → Coolify deploy webhook`
+- Lighthouse CI enforcing mobile perf budgets on every build (red → no deploy)
+- CI env-lint rejecting `APP_ENV=e2e|seed` / `E2E_AUTH_RATE_LIMIT_DISABLED=1` / `MCP_RUN_SQL_ENABLED=1` in production env values; assert BA's internal rate-limiter stays disabled
+- Closed-set `after`-shape lint wired into CI; AST walk for `hooks.before` throws + inline-audit invariant
+- `check:e2e-coverage` MCP-mutation extension (currently tRPC-only)
+- PgBouncer set to `pool_mode = transaction | session` (statement pooling breaks RLS) — hard-refuse if statement-mode
+- BunnyCDN storage + pull zone
+- Sentry project + `beforeSend` scrubber (builds on chunk 9 scrubbing pass)
+- Nightly `pg_dump` → Hetzner Storage Box, basic health check, uptime monitoring
+- Coolify GitHub PAT wired for auto-deploy on green CI
+
+These items are NOT abandoned — they are simply scheduled for Phase 1b where they have a target.
 
 **Note for deferred scope** (see `prd.md` §4 "Deferred"): `pgvector`, Voyage AI embeddings, and the customer-facing AI bot are **post-revenue**. Do not add them to remaining Phase 0 chunks. Owner admin chat ("Chat with your store", Phase 4) is NOT deferred — it uses MCP tools + `run_sql_readonly`, no embeddings.
 
@@ -78,7 +97,7 @@ All of these work today. They are the definition of done (see Section 1):
 | `pnpm check:e2e-coverage` | Verifies every route and mutation has a referencing Playwright test |
 | `pnpm build` | Production build |
 
-No feature is considered done until the first six are green locally and in CI.
+No feature is considered done until the first six are green locally. **Until Phase 1b's Launch infrastructure block lands**, there is no hosted CI pipeline — "green" means developer-run against the local Docker Compose stack on the owner's machine. Once Launch infrastructure lands, the same commands run in the hosted pipeline and block deploys on red.
 
 ---
 

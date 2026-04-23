@@ -290,6 +290,8 @@ Each phase ends with a clear deliverable. Phase 0 is foundation; Phase 1 onward 
 
 Claude Code can automate almost everything, but it cannot create accounts or prove your identity to third parties. Before a fresh Claude session starts Phase 0, the owner must have the following in hand. Claude should ask for any of these values it needs and should halt rather than guess.
 
+> **Note on phasing.** Phase 0 is scoped to **local-only foundation** work — no production host, no CI pipeline, no CDN, no error-monitoring DSN. Of the items below, only the **GitHub repo + PAT**, **Anthropic API key**, and **local dev machine** are strictly blocking for Phase 0. The **Hetzner Cloud account**, **Sentry DSN**, **domain registration**, and **launch domain names** are only required when the **Launch infrastructure** block (at the top of Phase 1b) is scheduled, which is closer to first public launch. The other hosting-related items in the "deferred but worth starting paperwork" table (Moyasar, Resend, Unifonic, BunnyCDN, ZATCA, Nafath, Apple Developer) are needed by the phase each row notes and are not blockers for Phase 0 or Launch infrastructure unless called out there.
+
 **Accounts and credentials (required to start Phase 0):**
 
 | Item | Purpose | What Claude needs |
@@ -299,7 +301,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 | Anthropic (Claude) API key | All AI features from day zero | `ANTHROPIC_API_KEY` |
 | Sentry account (free tier) | Error observability | Project DSN |
 | A registered domain + DNS provider access | Custom domains per tenant | Registrar credentials or API access (Cloudflare recommended for DNS + WAF) |
-| **Two domain names chosen** for the main tenant and the sister tenant | Phase 0 wires at least one into Traefik/Coolify | The actual strings (e.g., `brand-a.com`, `brand-b.com`) |
+| **Two domain names chosen** for the main tenant and the sister tenant | Launch infrastructure (top of Phase 1b) wires at least one into Traefik/Coolify | The actual strings (e.g., `brand-a.com`, `brand-b.com`) |
 | A local machine with Docker, pnpm, and Node 22 LTS installed | Running the dev loop and Playwright locally | — |
 
 **Accounts deferred but worth starting the paperwork for (can be collected later):**
@@ -316,7 +318,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 
 **Decisions the owner must make before Phase 0:**
 
-1. **The two launch domain names.** Phase 5 launches them; Phase 0 needs at least one real name to wire into Coolify. Placeholders are acceptable for local dev but production domains must be real before Phase 5.
+1. **The two launch domain names.** Phase 5 launches both; the Launch infrastructure block inside Phase 1b needs at least one real name to wire into Coolify. Placeholders are acceptable for local dev but production domains must be real before Phase 1b's public URL goes live, and both before Phase 5.
 2. **Company legal entity / CR number** for KSA compliance (used for VAT, ZATCA, Moyasar onboarding).
 3. **Admin email address** for the first owner account and for Sentry / Resend / Hetzner notifications.
 4. **Slack or email channel** where daily digests and agent alerts will land.
@@ -325,28 +327,19 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 **What Claude Code will do in the first Phase 0 session:**
 
 1. Read `prd.md` and `CLAUDE.md` fully.
-2. Ask the owner for the values in the tables above that are needed *right now* (Hetzner token, GitHub repo, Claude API key, Sentry DSN, the first domain name). Defer the rest.
-3. Store secrets in Coolify / GitHub Actions, never commit them.
+2. Ask the owner for the values in the tables above that are needed *right now* (GitHub repo + PAT, Claude API key, local dev machine details). Defer Hetzner, Sentry, and production domain names until the Launch infrastructure block of Phase 1b.
+3. Store local-dev secrets in `.env.local` (gitignored); production secrets land in Coolify / GitHub Actions only when Launch infrastructure is scheduled.
 4. Halt on anything it cannot obtain, explaining exactly what is missing.
 
 ---
 
-### Phase 0 — Foundation (not shippable)
+### Phase 0 — Foundation (not shippable, local-only)
 
-**Goal:** Infra, schema, auth skeleton, AI primitives, API layer, and deploy pipeline in place. Nothing user-visible.
+**Goal:** Local-runnable foundation — schema, auth skeleton, AI primitives, service-layer API, tenant isolation, testing harness, and observability prep. Nothing is deployed to a public host. The production VM, CI pipeline, CDN, and error-monitoring wiring live in the **Launch infrastructure** block at the top of Phase 1b, which ships closer to first public launch. Phase 0 is fully solo-developable on a laptop against local Docker Compose; its checks run locally and gate commits via developer discipline rather than a hosted CI pipeline.
+
+**Why split this way (rationale, 2026-04-23):** at Phase 0 close, there is one developer, no production host, no staff, and no customers. A hosted CI pipeline and Coolify deploy webhook have no target to point at and no second set of hands whose pushes they would guard. The two pieces of the original "deploy pipeline" goal that are genuinely load-bearing today — error-log scrubbing (so that customer identifiers never leak into logs, before any error-monitoring DSN is wired) and boot-time production-safety guards (so that a misconfigured production env cannot start) — are kept in Phase 0. The rest (Hetzner VM, Coolify, CI workflow, Sentry DSN, Lighthouse CI enforcement, CDN, backups, uptime monitoring) moves to Launch infrastructure and lands in one coordinated pass before Phase 1b's public URL goes live.
 
 **Work:**
-
-*Infrastructure*
-- Hetzner Cloud VM provisioned (CCX or CPX class, Ubuntu LTS)
-- Coolify installed and configured
-- Postgres, Redis, Meilisearch running as Coolify-managed services
-- BunnyCDN storage bucket + pull zone created
-- GitHub repo + Actions → Coolify deploy webhook
-- Env management + secrets in Coolify
-- Sentry wired up
-- Nightly pg_dump → Hetzner Storage Box
-- Basic health check / uptime monitoring
 
 *Application*
 - Next.js 15 app scaffolded with TypeScript, Tailwind, shadcn/ui, Drizzle, Better Auth
@@ -357,6 +350,9 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - Tenant resolution middleware (`Host` header → tenant context)
 - i18n routing middleware (`/en`, `/ar`)
 
+*Local services*
+- Docker Compose stack: Postgres 16, Redis 7, Meilisearch 1.12, Mailpit (SMTP + web UI) — all on shifted local host ports to avoid colliding with other dev stacks
+
 *AI primitives*
 - `@anthropic-ai/sdk` initialized; Claude API key in env
 - MCP server skeleton running (one tool live end-to-end as proof)
@@ -364,18 +360,22 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - Audit log middleware wrapping every service-layer write
 - `run_sql_readonly` tool stubbed (gated, not yet exposed)
 
+*Observability prep (precedes Sentry wiring in Launch infrastructure)*
+- Error-log scrubbing across every error path — strip customer identifiers (email, PAT plaintext / hash, membership user id, etc.) and tenant IDs from messages, stack-frame extras, and contextual metadata before they reach stdout, so that when a Sentry DSN is eventually wired the `beforeSend` scrubber only has a narrow last-mile job. Includes the known `withTenant` flat-only throw that embeds the outer `tenantId` in its error message
+- Boot-time production-safety guards — at `NODE_ENV=production`, refuse to start with any test-only switch active (`APP_ENV=e2e|seed`, `E2E_AUTH_RATE_LIMIT_DISABLED=1`, `MCP_RUN_SQL_ENABLED=1`), and refuse on first request if the reverse-proxy is not setting `x-real-ip` (503 `proxy_header_missing`). Hard-refuse boot check that `DATABASE_URL_BA` never points at `app_user` (would silently filter BA's writes under RLS)
+- Magic-link audit log race fix — when two or more magic-link consumes race at the same instant, tolerate the `audit_payloads` primary-key collision so both forensic detail rows land (today, the losing racer's detail row is dropped; the companion `audit_log` row still lands). Regression test drives two simultaneous consumes against Mailpit and asserts both detail rows exist
+
 *Testing infrastructure*
 - Playwright installed and configured with mobile-first projects (iPhone 14, Pixel 7) + locale-parameterized projects (`en`, `ar`)
 - `@axe-core/playwright` wired into a shared test helper
-- Mailpit container running in Coolify + docker-compose for local dev
 - Vitest configured for unit/integration tests
-- Lighthouse CI configured with mobile perf budgets (LCP, INP, CLS, JS bundle size)
-- GitHub Actions workflow: lint → typecheck → vitest → playwright → lighthouse-ci → deploy webhook (fails-closed)
-- `scripts/check-e2e-coverage.ts` created — enumerates routes + tRPC mutations, asserts each has a Playwright test
+- Lighthouse CI **config present locally** with mobile perf budgets (LCP, INP, CLS, JS bundle size) — budgets are runnable on-demand, but CI-level enforcement (red → no deploy) moves to Launch infrastructure
+- `scripts/check-e2e-coverage.ts` — enumerates routes + tRPC mutations, asserts each has a Playwright test (developer-runnable; hosted CI enforcement lands in Launch infrastructure)
+- `scripts/check-role-invariants.ts` — AST walks for the R-1/R-2/R-3/R-4 invariants around role gates and pre-auth tenant helpers
 - `CLAUDE.md` created at repo root with the testing rule and vibe-coding operational guidance
-- One example Playwright test covering the seeded "hello world" page in both locales on mobile viewport — proves the whole pipeline is green end-to-end
+- One example Playwright test covering the seeded "hello world" page in both locales on mobile viewport — proves the local pipeline is green end-to-end
 
-**Exit criteria:** A "hello world" page resolves on two different local-dev domains, each in both English and Arabic, with tenant isolation working at the DB level. The MCP server is reachable with a personal access token, and a test tool call against the single example service function succeeds and appears in the audit log. A tRPC procedure is callable from the web and returns typed data. **A Playwright test runs the hello-world page in both locales on mobile viewport, passes axe, meets Lighthouse budgets, and CI is green end-to-end. The coverage lint script passes.**
+**Exit criteria:** A "hello world" page resolves on two different local-dev domains, each in both English and Arabic, with tenant isolation working at the DB level. The MCP server is reachable with a personal access token, and a test tool call against the single example service function succeeds and appears in the audit log. A tRPC procedure is callable from the web and returns typed data. **A Playwright test runs the hello-world page in both locales on mobile viewport and passes axe. All local checks — `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, `pnpm check:e2e-coverage`, `pnpm check:role-invariants` — are green. Error-log scrubbing is in place across all error paths, boot-time production-safety guards are wired, and the magic-link audit race no longer drops forensic detail rows.** No hosted CI pipeline yet — that lands in Launch infrastructure.
 
 ---
 
@@ -403,15 +403,35 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - MCP tools live: `create_product`, `update_product`, `delete_product`, `search_products`, `get_product`, `list_categories`, `create_category`
 - Tools accept and return bilingual fields; owner can drive product entry from Claude Desktop in either language
 
-**Exit criteria:** The owner can add a fully bilingual product (`ar` + `en` content, images with alt text in both languages) via the admin UI **or** via Claude Desktop, and verify it via tRPC and MCP tool calls. No public storefront yet. **Playwright coverage: admin product CRUD with bilingual content entry; AI assist panel happy path in both directions (`ar`→`en` and `en`→`ar`); missing-translation badge displays correctly. All on mobile viewport. CI green.**
+**Exit criteria:** The owner can add a fully bilingual product (`ar` + `en` content, images with alt text in both languages) via the admin UI **or** via Claude Desktop, and verify it via tRPC and MCP tool calls. No public storefront yet. **Playwright coverage: admin product CRUD with bilingual content entry; AI assist panel happy path in both directions (`ar`→`en` and `en`→`ar`); missing-translation badge displays correctly. All on mobile viewport. Local checks (lint, typecheck, vitest, Playwright, coverage lint) green — hosted CI enforcement does not exist yet; it lands in the Launch infrastructure block at the top of Phase 1b.**
 
 ---
 
 ### Phase 1b — Public bilingual storefront (shippable as a browse-only site)
 
-**Goal:** The main tenant's domain is live, publicly indexable, and browseable in both Arabic and English from day one. Customers can find and view products in their preferred language with proper RTL layout; they cannot buy yet.
+**Goal:** The main tenant's domain is live, publicly indexable, and browseable in both Arabic and English from day one. Customers can find and view products in their preferred language with proper RTL layout; they cannot buy yet. This phase also delivers the production infrastructure that Phase 0 deferred: host, CI, CDN, error monitoring, and backups.
 
 **Work:**
+
+*Launch infrastructure (deferred from Phase 0 — must land before the public URL goes live)*
+
+This is the first time the project touches production hosting. It is delivered as one coordinated pass so the public URL can be brought up with all guardrails in place simultaneously; nothing ships to a real domain before this block closes.
+
+- Hetzner Cloud VM provisioned (CCX or CPX class, Ubuntu LTS)
+- Coolify installed and configured
+- Postgres, Redis, Meilisearch running as Coolify-managed services (parity with the local Docker Compose stack). PgBouncer (if introduced) configured with `pool_mode = transaction | session` — statement-mode pooling breaks RLS and is a hard-refuse
+- BunnyCDN storage bucket + pull zone created
+- Mailpit container running in Coolify for staging email preview (local dev continues to use Docker Compose)
+- GitHub repo wired to GitHub Actions → Coolify deploy webhook
+- GitHub Actions workflow, fails-closed: `lint → typecheck → vitest → playwright → lighthouse-ci → check-e2e-coverage → check-role-invariants → deploy webhook`
+- Lighthouse CI enforcing mobile perf budgets on every build — red → no deploy
+- `check:e2e-coverage` extended to cover MCP mutations (currently tRPC-only) so every transport's writes are forced to carry a Playwright test
+- AST-level lint: `throw APIError` in a BA `hooks.before` must be preceded by an inline `writeAuditInOwnTx`; `after`-shape closed-set lint for `auth.*` operations (≤3 keys, structural-only)
+- Env management + secrets in Coolify. CI env-lint rejects any test-only switch in production values (`APP_ENV=e2e|seed`, `E2E_AUTH_RATE_LIMIT_DISABLED=1`, `MCP_RUN_SQL_ENABLED=1`) and asserts Better Auth's internal rate-limiter stays disabled (our Redis sliding-window is authoritative)
+- Sentry project wired up with a `beforeSend` scrubber that strips customer identifiers, PAT plaintext/hash, and captured React-component props. Builds on the Phase 0 error-log scrubbing pass so the scrubber is the last line of defense, not the only one
+- Nightly `pg_dump` → Hetzner Storage Box with restore drill documented
+- Basic health check / uptime monitoring
+- Coolify GitHub PAT wired for auto-deploy on green CI
 
 *Public storefront pages*
 - Home (featured products, categories)
