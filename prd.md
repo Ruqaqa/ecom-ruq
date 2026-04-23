@@ -2,7 +2,7 @@
 
 **Status:** Draft v2
 **Owner:** Bassel
-**Last updated:** 2026-04-17
+**Last updated:** 2026-04-23
 
 ---
 
@@ -173,7 +173,8 @@ Baked in from Phase 0:
 ### 3.6 Tenancy & auth interaction
 
 - Users belong to the platform, not a tenant. A single user can have accounts across multiple tenant storefronts (different carts, different order histories), because the sister-company case means the same customer may shop both brands.
-- Admin users belong to a **tenant** with a role (owner / staff) and permissions.
+- Admin users belong to a **tenant** with a role (owner / staff / support) and permissions.
+- **Launch roles are fixed with predefined permission sets.** A **custom role + permission builder** — letting the owner define new roles and attach fine-grained permissions (e.g., "view tokens", "create tokens", "revoke tokens" as separate capabilities) to each — is delivered in **Phase 7**. Phase 0–6 code gates on role identity; the Phase 7 migration converts those gates to permission-identity checks. To keep that migration surgical, all role gates in Phase 0–6 must route through a single authorization helper — never inline.
 - A super-admin role exists for platform operators (us).
 - **Transactional email links must be tenant-aware.** Magic link, password reset, email verification, and order confirmation emails all contain URLs — those URLs must be built against the **tenant's own custom domain**, not a shared domain. The auth layer passes tenant context into the `sendEmail` function so the link host matches where the user actually signed up. Same rule applies to any tenant-scoped email: the link always points to that tenant's domain. Email sender identity (From address, DKIM) is also per-tenant via Resend domains.
 
@@ -508,7 +509,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - Order fulfillment workflow: pending → paid → packed → shipped → delivered, with timestamps
 - Discount codes (percentage / fixed, per-product / cart-wide, usage limits, expiry)
 - Returns & refund workflow (customer-initiated request → admin approval → refund)
-- Role-based admin: owner, staff, support
+- Role-based admin: **fixed roles** (owner, staff, support) with predefined permission sets. A custom role + permission builder is Phase 7 (see §3.6) — every role gate in this phase must route through a single authorization helper so the Phase 7 migration stays surgical.
 
 *"Chat with your store" interface*
 - Dedicated `/admin/chat` page: a Claude-powered chat bound to the MCP server via the current user's personal access token
@@ -566,9 +567,9 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 
 ---
 
-### Phase 7 — Growth features
+### Phase 7 — Growth features + team scaling
 
-**Goal:** Features that move the needle on conversion, AOV, retention. The customer-facing AI assistant originally scoped here has been deferred (see §4 "Deferred") — this phase ships the non-AI growth features and the AI writing-assist features that don't depend on semantic retrieval.
+**Goal:** Features that move the needle on conversion, AOV, and retention — plus the team-scaling features needed as the business grows beyond solo operation. The customer-facing AI assistant originally scoped here has been deferred (see §4 "Deferred") — this phase ships the non-AI growth features, the AI writing-assist features that don't depend on semantic retrieval, and a custom RBAC model for scaling the admin team.
 
 **Work:**
 
@@ -576,6 +577,17 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - AI-generated abandoned cart emails (personalized copy per recovered cart, owner review before send)
 - AI blog post drafting (SEO content marketing) with owner review
 - Rule-based cross-sell / upsell recommendations (admin-curated "frequently bought together" mappings, plus simple category-based suggestions; semantic/vector-backed recommendations are deferred — see §4 "Deferred")
+
+*Team & operations (custom RBAC)*
+- **Custom role + permission builder.** Owner can define new roles per tenant and attach fine-grained permissions to each. Replaces the fixed owner/staff/support triad from Phase 4 with a data-driven model.
+  - **Permission catalog** (seeded from code, not user-editable): every sensitive operation the platform exposes is a named permission (e.g., `tokens.view`, `tokens.create`, `tokens.revoke`, `products.create`, `orders.refund`, `inventory.adjust`, `run_sql_readonly`, etc.). Permissions are grouped by domain for UI.
+  - **Roles table** (per-tenant, tenant-editable): name + description + ordered permission set. The three launch roles (owner, staff, support) are seeded as system roles and remain un-deletable; the owner can clone them into custom roles or create fresh ones.
+  - **Memberships** reference a role (not a hardcoded role string), making "make this user a 'fulfillment clerk'" a one-click reassignment.
+  - **Permission checks migrate from role-equals-X to permission-in-set.** Every gate in the codebase (tRPC procedures, MCP tool visibility, admin UI affordances) asks "does the caller hold permission Y?" rather than "is the caller role X?". The single authorization helper introduced in Phase 0–6 (§3.6) is the one place that changes.
+  - **Audit log records the permission that authorized each operation**, not just the role, so forensics can answer "who had 'refund orders' when?" after the fact.
+  - **MCP personal access tokens** become permission-scoped: minting a token selects a subset of the caller's current permissions (cannot widen beyond caller). Role-based scoping in Phase 0–6 upgrades transparently — a token minted with "staff role" migrates to the permission set that role held at mint time.
+  - **Admin UI:** roles list, role editor (name + permissions checklist), membership-to-role reassignment, role deletion guard (cannot delete a role with active memberships).
+  - **Super-admin** retains cross-tenant god-mode independent of per-tenant RBAC; a tenant owner cannot escalate themselves to super-admin.
 
 *Other growth features*
 - **BNPL:** Tabby and Tamara via Moyasar or direct
@@ -588,7 +600,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - **Loyalty points** (if desired)
 - **Referral program**
 
-**Exit criteria:** Abandoned cart recovery emails are AI-generated and measurably lifting recovered revenue. BNPL checkout works end-to-end. Nafath sandbox verification is integrated. **Playwright coverage: BNPL checkout flow with Tabby/Tamara test mode; review submission with moderation; Nafath sandbox verification flow. All in both locales on mobile viewport.**
+**Exit criteria:** Abandoned cart recovery emails are AI-generated and measurably lifting recovered revenue. BNPL checkout works end-to-end. Nafath sandbox verification is integrated. Owner can create a custom role, assign permissions to it, attach a team member to that role, and have every authorization gate (web admin, MCP, personal access tokens) honor the new role immediately — with audit entries recording the permission that authorized each action. **Playwright coverage: BNPL checkout flow with Tabby/Tamara test mode; review submission with moderation; Nafath sandbox verification flow; custom-role create → permission assign → member assign → gated action succeeds → same action by different-role member blocked → audit shows permission name. All in both locales on mobile viewport.**
 
 ---
 
