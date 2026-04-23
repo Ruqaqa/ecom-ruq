@@ -146,10 +146,11 @@ export async function createAccessToken(
   role: Role,
   input: CreateAccessTokenInput,
 ): Promise<CreateAccessTokenOutput> {
-  // Role gate — owner-only. Non-owner → FORBIDDEN. The tRPC `requireMembership`
-  // middleware also guards, but the service-layer check is defense-in-depth
-  // for MCP / internal-job callers that reuse the service without the
-  // tRPC stack.
+  // Role gate — owner-only. Non-owner → FORBIDDEN. The tRPC `requireRole`
+  // middleware also guards (and adds `identity: 'session'` so bearer
+  // callers are rejected before reaching here), but the service-layer
+  // check is defense-in-depth for MCP / internal-job callers that reuse
+  // the service without the tRPC stack.
   if (role !== "owner") {
     throw new TRPCError({
       code: "FORBIDDEN",

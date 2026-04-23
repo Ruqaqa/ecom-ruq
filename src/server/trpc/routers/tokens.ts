@@ -1,24 +1,39 @@
 /**
- * Tokens tRPC router — sub-chunk 7.1.
+ * Tokens tRPC router — sub-chunk 7.1, tightened in 7.6.2.
  *
- * Three procedures, mirroring the products router conventions:
- *   - `create`  = mutationProcedure . use(requireMembership(['owner'])) . input(...) . mutation(...)
- *     Audit auto-wraps. Returns plaintext ONCE. Owner-only mint.
- *   - `revoke`  = mutationProcedure . use(requireMembership(['owner'])) . input(...) . mutation(...)
- *     Audit auto-wraps. Soft-revoke. Owner-only. `confirm: true` required.
- *   - `list`    = publicProcedure   . use(requireMembership(['owner','staff'])) . query(...)
- *     NOT audited (queries never are, per prd.md §3.7). Owner + staff
- *     allowed; support falls through to FORBIDDEN via requireMembership.
+ * Three procedures. All three are SESSION-ONLY and OWNER-ONLY in Phase 0:
+ * bearer tokens must not self-administer other bearer tokens (locked user
+ * decision, 2026-04-23). The Phase 7 RBAC permission builder adds
+ * `tokens.manage` as the escape hatch when fine-grained permissions land.
+ *
+ *   - `create`  = mutationProcedure
+ *                   .use(requireRole({ roles:['owner'], identity:'session' }))
+ *                   .input(...).mutation(...)
+ *     Audit auto-wraps. Returns plaintext ONCE.
+ *   - `revoke`  = mutationProcedure
+ *                   .use(requireRole({ roles:['owner'], identity:'session' }))
+ *                   .input(...).mutation(...)
+ *     Audit auto-wraps. Soft-revoke. `confirm: true` required.
+ *   - `list`    = publicProcedure
+ *                   .use(requireRole({ roles:['owner'], identity:'session' }))
+ *                   .query(...)
+ *     NOT audited (queries never are, per prd.md §3.7). Double-tightened
+ *     in 7.6.2: staff no longer has an operational need, and the PAT
+ *     inventory is reconnaissance surface. The service-layer gate at
+ *     `listAccessTokens` still admits owner+staff as defense-in-depth
+ *     for non-tRPC callers; the router simply refuses everyone else.
  *
  * Wire-site pattern (copied from `products.ts`): role derives from
- * `deriveRole(ctx)`, NEVER from input. The tripwire throws
- * INTERNAL_SERVER_ERROR if role derivation ever returns falsy (future
- * refactor canary). Service is passed the narrow `{ id: ctx.tenant.id }`
- * projection + `ctx.authedCtx.userId` for the caller user id.
+ * `deriveRole(ctx)`, NEVER from input. `requireRole` also reads through
+ * `deriveRole` (not `ctx.membership.role`), closing the S-5 blind spot
+ * `requireMembership` left open. The tripwire throws INTERNAL_SERVER_ERROR
+ * if role derivation ever returns falsy (future refactor canary). Service
+ * is passed the narrow `{ id: ctx.tenant.id }` projection + the caller
+ * user id.
  */
 import { router, publicProcedure, TRPCError } from "../init";
 import { mutationProcedure } from "../middleware/audit-wrap";
-import { requireMembership } from "../middleware/require-membership";
+import { requireRole } from "../middleware/require-role";
 import { deriveRole } from "../ctx-role";
 import {
   createAccessToken,
@@ -34,7 +49,7 @@ import { buildAuthedTenantContext } from "@/server/tenant/context";
 
 export const tokensRouter = router({
   create: mutationProcedure
-    .use(requireMembership(["owner"]))
+    .use(requireRole({ roles: ["owner"], identity: "session" }))
     .input(CreateAccessTokenInputSchema)
     .mutation(async ({ ctx, input }) => {
       const role = deriveRole(ctx);
@@ -63,7 +78,7 @@ export const tokensRouter = router({
     }),
 
   revoke: mutationProcedure
-    .use(requireMembership(["owner"]))
+    .use(requireRole({ roles: ["owner"], identity: "session" }))
     .input(RevokeAccessTokenInputSchema)
     .mutation(async ({ ctx, input }) => {
       const role = deriveRole(ctx);
@@ -90,9 +105,13 @@ export const tokensRouter = router({
     }),
 
   // Queries are NOT audited per prd.md §3.7. `list` uses publicProcedure
-  // (no audit-wrap) then gates via requireMembership(['owner','staff']).
+  // (no audit-wrap) then double-tightens via requireRole: session-only
+  // AND owner-only. Staff no longer has an operational need for the PAT
+  // inventory (locked 7.6.2 decision); the service-layer gate inside
+  // `listAccessTokens` still admits owner+staff as defense-in-depth for
+  // non-tRPC callers.
   list: publicProcedure
-    .use(requireMembership(["owner", "staff"]))
+    .use(requireRole({ roles: ["owner"], identity: "session" }))
     .query(async ({ ctx }) => {
       const role = deriveRole(ctx);
       if (!role) {
@@ -105,9 +124,11 @@ export const tokensRouter = router({
         // No DB configured — empty list is the least-surprising answer.
         return [];
       }
-      // `requireMembership` composes `requireSession`, so ctx.identity is
-      // narrowed to session | bearer here — never anonymous. We branch on
-      // bearer only because it's the one path that carries a tokenId.
+      // `requireRole({ identity:'session' })` rejects bearer at the
+      // middleware — by the time we get here ctx.identity.type is
+      // 'session' (not anonymous, not bearer). We keep the bearer
+      // branch below for structural completeness only; it is
+      // unreachable on the tokens.list path.
       const identity = ctx.identity;
       const authedCtx = buildAuthedTenantContext(
         { id: ctx.tenant.id },

@@ -13,11 +13,12 @@
  *   - revealedToken: the plaintext of a just-minted PAT (nullable)
  *   - revokeTarget: { id, name } of a row the user is confirming revoke for
  *
- * Role branching:
+ * Role branching (tightened in 7.6.2):
  *   - owner: sees everything (list + create + revoke).
- *   - staff: sees list ONLY. No create button, no revoke action. The
- *     server-side role gate still holds even if the UI is bypassed
- *     (tokens.create / tokens.revoke both require 'owner').
+ *   - staff: sees a "tokens are owner-only" notice. No list query, no
+ *     create button, no revoke action. Server-side role gate is the
+ *     source of truth — this is a UX optimization so staff don't see
+ *     an empty list that would then FORBID on refresh anyway.
  */
 "use client";
 
@@ -52,9 +53,12 @@ export function TokensClient({ viewerRole }: Props) {
 
   // Pause list query while the reveal panel is mounted: a refetch after
   // a successful create would flash the row before the user copies the
-  // plaintext. Re-enable on ack/unmount.
+  // plaintext. Re-enable on ack/unmount. Staff callers skip the query
+  // entirely — the server-side gate (requireRole + identity:'session'
+  // + roles:['owner']) would FORBID, and we don't want a pointless
+  // 403 in the network tab.
   const listQuery = trpc.tokens.list.useQuery(undefined, {
-    enabled: revealed === null,
+    enabled: revealed === null && viewerRole === "owner",
     refetchOnWindowFocus: false,
   });
 
@@ -92,6 +96,17 @@ export function TokensClient({ viewerRole }: Props) {
         name={revealed.name}
         onAck={onAck}
       />
+    );
+  }
+
+  if (viewerRole !== "owner") {
+    return (
+      <div
+        role="status"
+        className="rounded-md border border-neutral-200 bg-white p-4 text-sm text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300"
+      >
+        {t("ownerOnlyNotice")}
+      </div>
     );
   }
 

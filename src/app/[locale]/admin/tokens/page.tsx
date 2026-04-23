@@ -12,8 +12,10 @@
  * controls for staff. The RSC->client trust boundary is: the client
  * can never widen its own role (no server actions here, see
  * tokens-client.tsx header note). Tampering with the prop buys nothing
- * because the create/revoke mutations enforce the role gate server-side
- * via `requireMembership(['owner'])`.
+ * because all tokens.* procedures enforce the gate server-side via
+ * `requireRole({ roles: ['owner'], identity: 'session' })` (7.6.2):
+ * owner-only AND session-only, so bearer tokens cannot self-administer
+ * other bearer tokens.
  */
 import type { Metadata } from "next";
 import { headers } from "next/headers";

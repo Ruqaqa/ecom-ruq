@@ -8,9 +8,10 @@
  *   - bearer callers carry `effectiveRole` (see resolve-request-identity);
  *     session callers read `membership.role`. The bearer short-circuit is
  *     the S-5 stale-membership fix — a PAT minted as owner for a now-
- *     demoted user resolves as staff at deriveRole, not at
- *     requireMembership (which still reads `membership.role` for the
- *     role gate; 7.6 ships requireRole() to close that gap).
+ *     demoted user resolves as staff at deriveRole. The 7.6.2 `requireRole`
+ *     middleware reads through this helper (not `ctx.membership.role`
+ *     directly), so the role gate honors the same short-circuit and the
+ *     old `requireMembership` blind spot is closed.
  *   - session path: role comes from ctx.membership?.role, with the
  *     customer fallback for session-without-membership (prd.md §3.6).
  *   - anonymous identity → 'anonymous'. Customer session → 'customer'.

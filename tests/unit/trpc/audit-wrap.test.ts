@@ -465,7 +465,7 @@ describe("audit-wrap middleware", () => {
   });
 });
 
-describe("requireSession / requireMembership middlewares", () => {
+describe("requireSession / requireRole middlewares", () => {
   it("requireSession rejects anonymous with UNAUTHORIZED", async () => {
     const { router } = await import("@/server/trpc/init");
     const { sessionProcedure } = await import("@/server/trpc/middleware/require-session");
@@ -499,9 +499,9 @@ describe("requireSession / requireMembership middlewares", () => {
     expect(out.userId).toBe((ctx.identity as { userId: string }).userId);
   });
 
-  it("requireMembership rejects a customer (session + null membership) with FORBIDDEN", async () => {
+  it("requireRole rejects a customer (session + null membership) with FORBIDDEN", async () => {
     const { router } = await import("@/server/trpc/init");
-    const { requireMembership } = await import("@/server/trpc/middleware/require-membership");
+    const { requireRole } = await import("@/server/trpc/middleware/require-role");
     const tenantId = await makeTenant();
     const ctx = await buildCtx({
       tenantId,
@@ -511,14 +511,14 @@ describe("requireSession / requireMembership middlewares", () => {
     });
 
     const { publicProcedure } = await import("@/server/trpc/init");
-    const adminOnly = publicProcedure.use(requireMembership(["owner", "staff"]));
+    const adminOnly = publicProcedure.use(requireRole({ roles: ["owner", "staff"] }));
     const r = router({ adminOp: adminOnly.query(() => ({ ok: true })) });
     await expect(r.createCaller(ctx).adminOp()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("requireMembership(['owner','staff']) rejects a support-role membership", async () => {
+  it("requireRole({ roles:['owner','staff'] }) rejects a support-role membership", async () => {
     const { router, publicProcedure } = await import("@/server/trpc/init");
-    const { requireMembership } = await import("@/server/trpc/middleware/require-membership");
+    const { requireRole } = await import("@/server/trpc/middleware/require-role");
     const tenantId = await makeTenant();
     const ctx = await buildCtx({
       tenantId,
@@ -526,14 +526,14 @@ describe("requireSession / requireMembership middlewares", () => {
       userId: randomUUID(),
       membershipRole: "support",
     });
-    const adminOnly = publicProcedure.use(requireMembership(["owner", "staff"]));
+    const adminOnly = publicProcedure.use(requireRole({ roles: ["owner", "staff"] }));
     const r = router({ adminOp: adminOnly.query(() => ({ ok: true })) });
     await expect(r.createCaller(ctx).adminOp()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("requireMembership(['owner','staff']) passes for an owner", async () => {
+  it("requireRole({ roles:['owner','staff'] }) passes for an owner", async () => {
     const { router, publicProcedure } = await import("@/server/trpc/init");
-    const { requireMembership } = await import("@/server/trpc/middleware/require-membership");
+    const { requireRole } = await import("@/server/trpc/middleware/require-role");
     const tenantId = await makeTenant();
     const ctx = await buildCtx({
       tenantId,
@@ -541,11 +541,46 @@ describe("requireSession / requireMembership middlewares", () => {
       userId: randomUUID(),
       membershipRole: "owner",
     });
-    const adminOnly = publicProcedure.use(requireMembership(["owner", "staff"]));
+    const adminOnly = publicProcedure.use(requireRole({ roles: ["owner", "staff"] }));
     const r = router({
       adminOp: adminOnly.query(({ ctx }) => ({ role: ctx.membership.role })),
     });
     const out = await r.createCaller(ctx).adminOp();
     expect(out.role).toBe("owner");
+  });
+
+  it("requireRole({ identity:'session' }) + bearer owner caller → FORBIDDEN + failure audit row 'forbidden' under mutation", async () => {
+    // Mutation path, so the full audit-wrap composition runs. Bearer
+    // caller with a valid owner effectiveRole is REFUSED by the
+    // identity constraint; the failure audit row records `forbidden`.
+    const { router } = await import("@/server/trpc/init");
+    const { mutationProcedure } = await import("@/server/trpc/middleware/audit-wrap");
+    const { requireRole } = await import("@/server/trpc/middleware/require-role");
+    const tenantId = await makeTenant();
+    const userId = randomUUID();
+    const ctx = await buildCtx({
+      tenantId,
+      identityType: "bearer",
+      userId,
+      tokenId: "t_" + userId,
+      membershipRole: "owner",
+      effectiveRole: "owner",
+    });
+
+    const sessionGated = mutationProcedure.use(
+      requireRole({ roles: ["owner"], identity: "session" }),
+    );
+    const r = router({ op: sessionGated.mutation(() => ({ ok: true })) });
+
+    await expect(r.createCaller(ctx).op()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "session required for this action",
+    });
+
+    const rows = await readAuditRows(tenantId);
+    expect(rows.length).toBe(1);
+    const row = firstRow(rows);
+    expect(row.outcome).toBe("failure");
+    expect(row.error).toBe(JSON.stringify({ code: "forbidden" }));
   });
 });

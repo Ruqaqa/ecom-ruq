@@ -1,19 +1,25 @@
 /**
- * `tokensRouter` — sub-chunk 7.1 tRPC router integration tests.
+ * `tokensRouter` — tRPC router integration tests.
  *
- * Composition under test:
- *   create  = mutationProcedure .use(requireMembership(['owner'])) .input(...) .mutation(...)
- *   revoke  = mutationProcedure .use(requireMembership(['owner'])) .input(...) .mutation(...)
- *   list    = publicProcedure    .use(requireMembership(['owner','staff'])) .query(...)  [NOT audited]
+ * Composition under test (tightened in 7.6.2):
+ *   create  = mutationProcedure .use(requireRole({roles:['owner'], identity:'session'})) .input(...).mutation(...)
+ *   revoke  = mutationProcedure .use(requireRole({roles:['owner'], identity:'session'})) .input(...).mutation(...)
+ *   list    = publicProcedure    .use(requireRole({roles:['owner'], identity:'session'})) .query(...)  [NOT audited]
+ *
+ * All three procedures are SESSION-ONLY + OWNER-ONLY. Bearer tokens
+ * cannot self-administer other bearer tokens (locked 2026-04-23).
  *
  * Contract:
- *   - Owner create: success audit row; after-payload redacts plaintext
- *     (belt-and-braces matcher on 'plaintext').
- *   - Owner revoke: success audit row with forbidden structural shape.
- *   - Staff/anonymous create: FORBIDDEN/UNAUTHORIZED + failure audit
- *     errorCode='forbidden'.
- *   - Zod validation fail: validation_failed audit, input payload is
- *     field-paths only (not the raw name/slug).
+ *   - Owner session create: success audit row; after-payload redacts plaintext.
+ *   - Owner session revoke: success audit row.
+ *   - Staff session create: FORBIDDEN (owner-only) + failure audit 'forbidden'.
+ *   - Staff session list: FORBIDDEN (owner-only, double-tightened) + NO audit row (query).
+ *   - Anonymous: UNAUTHORIZED + failure audit 'forbidden' (mutations).
+ *   - Bearer owner create/revoke: FORBIDDEN 'session required for this action'
+ *     byte-exact + failure audit 'forbidden'.
+ *   - Bearer owner list: FORBIDDEN 'session required for this action' byte-exact
+ *     + NO audit row (query).
+ *   - Zod validation fail: validation_failed audit, field-paths only.
  *   - Cross-tenant revoke: NOT_FOUND audit.
  *   - `list` writes NO audit rows (queries do not audit).
  */
@@ -87,9 +93,12 @@ async function makeUserAndMembership(
 
 interface BuildCtxOpts {
   fixture: TenantFixture;
-  identityType: "anonymous" | "session";
+  identityType: "anonymous" | "session" | "bearer";
   userId?: string;
+  tokenId?: string;
   membershipRole?: "owner" | "staff" | "support";
+  /** For bearer identities: the post-min-merge `effectiveRole` (S-5). */
+  effectiveRole?: "owner" | "staff" | "support";
 }
 
 async function buildCtx(opts: BuildCtxOpts) {
@@ -111,7 +120,15 @@ async function buildCtx(opts: BuildCtxOpts) {
   const identity =
     opts.identityType === "anonymous"
       ? { type: "anonymous" as const }
-      : { type: "session" as const, userId: opts.userId!, sessionId: "s_" + opts.userId };
+      : opts.identityType === "session"
+        ? { type: "session" as const, userId: opts.userId!, sessionId: "s_" + opts.userId }
+        : {
+            type: "bearer" as const,
+            userId: opts.userId!,
+            tokenId: opts.tokenId!,
+            effectiveRole:
+              opts.effectiveRole ?? opts.membershipRole ?? ("owner" as const),
+          };
 
   const membership = opts.membershipRole
     ? {
@@ -260,6 +277,42 @@ describe("tokensRouter.create", () => {
     expect(joined).toMatch(/kind.*validation/);
     expect(joined).toMatch(/name/);
   });
+
+  it("bearer owner caller: FORBIDDEN 'session required for this action' (byte-exact) + failure audit 'forbidden'", async () => {
+    // 7.6.2 tightening: bearer tokens cannot mint other bearer tokens.
+    // Owner-role effectiveRole is valid on other surfaces (products.create),
+    // but tokens.* carries `identity: 'session'` so the bearer is refused
+    // at the middleware with the load-bearing "session required for this
+    // action" message. Audit row proves the bearer identity was captured
+    // before refusal (tokenId non-null via the adapter's actor derivation).
+    const { appRouter } = await import("@/server/trpc/root");
+    const fx = await makeTenant();
+    const { userId } = await makeUserAndMembership(fx.tenantId, "owner");
+    await flushIssuanceBucket(fx.tenantId);
+    const ctx = await buildCtx({
+      fixture: fx,
+      identityType: "bearer",
+      userId,
+      tokenId: "t_" + userId,
+      membershipRole: "owner",
+      effectiveRole: "owner",
+    });
+
+    await expect(
+      appRouter.createCaller(ctx).tokens.create(goodCreateInput()),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "session required for this action",
+    });
+
+    const rows = await readAuditRows(fx.tenantId);
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({
+      outcome: "failure",
+      operation: "tokens.create",
+      error: JSON.stringify({ code: "forbidden" }),
+    });
+  });
 });
 
 describe("tokensRouter.revoke", () => {
@@ -290,6 +343,41 @@ describe("tokensRouter.revoke", () => {
       outcome: "failure",
       operation: "tokens.revoke",
       error: JSON.stringify({ code: "not_found" }),
+    });
+  });
+
+  it("bearer owner caller: FORBIDDEN 'session required for this action' (byte-exact) + failure audit 'forbidden'", async () => {
+    // 7.6.2 tightening — same shape as the tokens.create bearer case,
+    // but on the revoke path. No need to mint first — the middleware
+    // refuses before reaching the service.
+    const { appRouter } = await import("@/server/trpc/root");
+    const fx = await makeTenant();
+    const { userId } = await makeUserAndMembership(fx.tenantId, "owner");
+    await flushIssuanceBucket(fx.tenantId);
+    const ctx = await buildCtx({
+      fixture: fx,
+      identityType: "bearer",
+      userId,
+      tokenId: "t_" + userId,
+      membershipRole: "owner",
+      effectiveRole: "owner",
+    });
+
+    await expect(
+      appRouter
+        .createCaller(ctx)
+        .tokens.revoke({ tokenId: randomUUID(), confirm: true }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "session required for this action",
+    });
+
+    const rows = await readAuditRows(fx.tenantId);
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({
+      outcome: "failure",
+      operation: "tokens.revoke",
+      error: JSON.stringify({ code: "forbidden" }),
     });
   });
 
@@ -343,15 +431,47 @@ describe("tokensRouter.list", () => {
     expect(rowsAfter.length).toBe(countBefore); // no query audit.
   });
 
-  it("staff caller: allowed", async () => {
+  it("staff caller: FORBIDDEN + NO audit row (7.6.2 double-tightening — list is owner-only AND session-only)", async () => {
+    // 7.6.2 tightening — the PAT inventory is reconnaissance surface
+    // and staff has no operational need today. The service-layer
+    // `listAccessTokens` still admits owner+staff as defense-in-depth
+    // for non-tRPC callers; the tRPC router refuses staff outright.
     const { appRouter } = await import("@/server/trpc/root");
     const fx = await makeTenant();
     const { userId } = await makeUserAndMembership(fx.tenantId, "staff");
-    await flushIssuanceBucket(fx.tenantId);
     const ctx = await buildCtx({ fixture: fx, identityType: "session", userId, membershipRole: "staff" });
 
-    const listed = await appRouter.createCaller(ctx).tokens.list();
-    expect(Array.isArray(listed)).toBe(true);
+    await expect(appRouter.createCaller(ctx).tokens.list()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "insufficient role",
+    });
+
+    // list is a query — NO audit row regardless of outcome.
+    const rows = await readAuditRows(fx.tenantId);
+    expect(rows.length).toBe(0);
+  });
+
+  it("bearer owner caller: FORBIDDEN 'session required for this action' (byte-exact) + NO audit row (query)", async () => {
+    const { appRouter } = await import("@/server/trpc/root");
+    const fx = await makeTenant();
+    const { userId } = await makeUserAndMembership(fx.tenantId, "owner");
+    const ctx = await buildCtx({
+      fixture: fx,
+      identityType: "bearer",
+      userId,
+      tokenId: "t_" + userId,
+      membershipRole: "owner",
+      effectiveRole: "owner",
+    });
+
+    await expect(appRouter.createCaller(ctx).tokens.list()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "session required for this action",
+    });
+
+    // Queries do NOT audit (prd.md §3.7).
+    const rows = await readAuditRows(fx.tenantId);
+    expect(rows.length).toBe(0);
   });
 
   it("support caller: FORBIDDEN", async () => {

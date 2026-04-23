@@ -52,7 +52,7 @@ import { deriveRole } from "../ctx-role";
 
 /**
  * Context override contributed by `auditWrap`. Downstream procedures (and
- * the `requireMembership` middleware it composes with) see these fields
+ * the `requireRole` middleware it composes with) see these fields
  * on `ctx`. On non-mutation paths where we short-circuit, `tx` /
  * `authedCtx` are null — the narrow type reflects that so consumers
  * handle both states.
@@ -189,7 +189,7 @@ export const auditWrap = middleware(async ({ ctx, path, type, getRawInput, next 
 /**
  * The adapter-level audit wrap. Mutations only — queries do NOT audit per
  * prd.md §3.7. Callers compose further: e.g.,
- *   `mutationProcedure.use(requireMembership(['owner','staff']))`.
+ *   `mutationProcedure.use(requireRole({ roles: ['owner','staff'] }))`.
  *
  * The `.unstable_pipe` on `auditWrap` narrows the override from the
  * nullable shape (required by tRPC for cross-branch type consistency) to

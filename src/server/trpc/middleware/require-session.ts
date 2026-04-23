@@ -4,7 +4,8 @@
  * for downstream consumers.
  *
  * This is the authentication gate. Per-role authorization (owner vs staff
- * vs customer) lives in `requireMembership`.
+ * vs customer) and the session-only identity constraint live in
+ * `requireRole` (see ./require-role.ts).
  */
 import { middleware, publicProcedure, TRPCError } from "../init";
 

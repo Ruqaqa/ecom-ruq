@@ -1,19 +1,23 @@
 /**
- * Block 4 — `productsRouter.create` tRPC procedure.
+ * `productsRouter.create` tRPC procedure integration tests.
  *
- * Composition under test:
- *   mutationProcedure                              (audit-wrap: tx + withTenant)
- *     .use(requireMembership(['owner','staff']))   (authn + role gate)
- *     .input(CreateProductInputSchema)             (Zod input validation)
- *     .mutation(...)                               (delegates to createProduct service)
+ * Composition under test (tightened in 7.6.2):
+ *   mutationProcedure                                  (audit-wrap: tx + withTenant)
+ *     .use(requireRole({ roles:['owner','staff'] }))   (authn + role gate, any identity)
+ *     .input(CreateProductInputSchema)                 (Zod input validation)
+ *     .mutation(...)                                   (delegates to createProduct service)
+ *
+ * `products.create` intentionally accepts bearer callers (default
+ * `identity: 'any'`) — unlike `tokens.*`, which is session-only.
  *
  * Contract:
- *   - owner role: success audit row; ProductOwner shape returned (includes costPriceMinor).
+ *   - owner session: success audit row; ProductOwner shape returned (includes costPriceMinor).
  *   - anonymous: UNAUTHORIZED from requireSession; failure audit with errorCode='forbidden'.
  *   - session + no membership (customer): FORBIDDEN; failure audit errorCode='forbidden'.
  *   - owner + invalid input (121-char slug.en): validation_failed; `input` column in the
  *     failure audit row is `{ kind: 'validation', failedPaths: [...] }`, NEVER the raw
  *     body (High-01 regression on the real mutation path).
+ *   - bearer owner: SUCCESS (identity constraint is 'any', default).
  *   - tenantId on the inserted row comes from ctx.tenant.id. There is no input field
  *     to spoof — CreateProductInputSchema.shape has no tenantId key — this invariant
  *     lives in block 3; the block-4 test confirms the wiring preserves it.
@@ -74,9 +78,11 @@ async function makeUserAndMembership(
 
 interface BuildCtxOpts {
   fixture: TenantFixture;
-  identityType: "anonymous" | "session";
+  identityType: "anonymous" | "session" | "bearer";
   userId?: string;
+  tokenId?: string;
   membershipRole?: "owner" | "staff" | "support";
+  effectiveRole?: "owner" | "staff" | "support";
 }
 
 async function buildCtx(opts: BuildCtxOpts) {
@@ -98,7 +104,15 @@ async function buildCtx(opts: BuildCtxOpts) {
   const identity =
     opts.identityType === "anonymous"
       ? { type: "anonymous" as const }
-      : { type: "session" as const, userId: opts.userId!, sessionId: "s_" + opts.userId };
+      : opts.identityType === "session"
+        ? { type: "session" as const, userId: opts.userId!, sessionId: "s_" + opts.userId }
+        : {
+            type: "bearer" as const,
+            userId: opts.userId!,
+            tokenId: opts.tokenId!,
+            effectiveRole:
+              opts.effectiveRole ?? opts.membershipRole ?? ("owner" as const),
+          };
 
   const membership = opts.membershipRole
     ? {
@@ -236,6 +250,36 @@ describe("productsRouter.create", () => {
     expect(payload).toMatchObject({ kind: "validation" });
     expect(JSON.stringify(payload)).not.toContain(sentinel);
     expect(JSON.stringify((payload as { failedPaths: string[] }).failedPaths)).toMatch(/slug/);
+  });
+
+  it("bearer owner caller: products.create SUCCESS (identity:'any' preserves bearer access)", async () => {
+    // 7.6.2 asymmetry proof: products.create does NOT pass
+    // `identity: 'session'`, so bearer callers with an owner
+    // effectiveRole succeed. Contrast with tokens.create, which
+    // FORBIDs bearer with the byte-exact "session required for this
+    // action" message.
+    const { appRouter } = await import("@/server/trpc/root");
+    const fx = await makeTenant();
+    const { userId } = await makeUserAndMembership(fx.tenantId, "owner");
+    const ctx = await buildCtx({
+      fixture: fx,
+      identityType: "bearer",
+      userId,
+      tokenId: "t_" + userId,
+      membershipRole: "owner",
+      effectiveRole: "owner",
+    });
+
+    const out = await appRouter.createCaller(ctx).products.create(goodInput());
+    expect(out).toMatchObject({ status: "draft" });
+
+    const rows = await readAuditRows(fx.tenantId);
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({
+      outcome: "success",
+      operation: "products.create",
+      error: null,
+    });
   });
 
   it("products row carries ctx.tenant.id, not anything input-derived (wiring-preserves-invariant check)", async () => {

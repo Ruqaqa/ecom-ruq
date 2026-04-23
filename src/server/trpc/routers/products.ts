@@ -4,15 +4,15 @@
  * `products.create` is the first real mutation in the codebase and the
  * first composition of the full middleware stack under mutationProcedure:
  *
- *   mutationProcedure                              (audit-wrap + tx via withTenant)
- *     .use(requireMembership(['owner','staff']))   (authn + role gate)
- *     .input(CreateProductInputSchema)             (Zod input validation)
- *     .mutation((opts) => createProduct(...))      (delegate to service)
+ *   mutationProcedure                                  (audit-wrap + tx via withTenant)
+ *     .use(requireRole({ roles:['owner','staff'] }))   (authn + role gate, any identity)
+ *     .input(CreateProductInputSchema)                 (Zod input validation)
+ *     .mutation((opts) => createProduct(...))          (delegate to service)
  *
  * The middleware composition order is load-bearing:
- *   - audit-wrap runs FIRST so a failure audit row captures requireMembership's
+ *   - audit-wrap runs FIRST so a failure audit row captures requireRole's
  *     FORBIDDEN decision, not just service errors.
- *   - requireMembership runs AFTER audit-wrap, so the authz decision + its
+ *   - requireRole runs AFTER audit-wrap, so the authz decision + its
  *     failure code ('forbidden') flow through mapErrorToAuditCode.
  *   - .input() runs before the .mutation() body, so invalid inputs short-
  *     circuit with a Zod BAD_REQUEST that audit-wrap maps to 'validation_failed'.
@@ -22,15 +22,21 @@
  * `deriveRole(ctx)` (see ../ctx-role.ts), NEVER from input (there is no
  * role field on CreateProductInputSchema).
  *
- * Role channel invariant (sub-chunk 7.2): bearer callers carry
+ * Role channel invariant (sub-chunk 7.2 + 7.6.2): bearer callers carry
  * `effectiveRole` on `ctx.identity`; session callers read
  * `membership.role`. `deriveRole` is the ONLY reader — we do NOT inline
  * `ctx.membership?.role` here or anywhere else under routers/. The
+ * `requireRole` middleware also goes through `deriveRole` (closing the
+ * S-5 blind spot `requireMembership` left open). The
  * `scripts/check-role-invariants.ts` grep-lint enforces both rules in CI.
+ *
+ * Identity constraint: `products.create` intentionally accepts bearer
+ * callers (`identity: 'any'` — the default) because mobile/MCP clients
+ * need to create products. `tokens.*` is the opposite: session-only.
  */
 import { router, TRPCError } from "../init";
 import { mutationProcedure } from "../middleware/audit-wrap";
-import { requireMembership } from "../middleware/require-membership";
+import { requireRole } from "../middleware/require-role";
 import { deriveRole } from "../ctx-role";
 import {
   createProduct,
@@ -39,7 +45,7 @@ import {
 
 export const productsRouter = router({
   create: mutationProcedure
-    .use(requireMembership(["owner", "staff"]))
+    .use(requireRole({ roles: ["owner", "staff"] }))
     .input(CreateProductInputSchema)
     .mutation(async ({ ctx, input }) => {
       // `role` MUST come from `deriveRole(ctx)`. NEVER from `input`, NEVER
