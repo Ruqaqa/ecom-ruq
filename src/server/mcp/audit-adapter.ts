@@ -221,14 +221,14 @@ export async function dispatchTool<TIn, TOut>(
       }
     } catch (err) {
       // fail-open — debounce never gates.
-      const { captureMessage } = await import("@/server/obs/sentry");
+      const { captureMessage, summarizeErrorForObs } = await import("@/server/obs/sentry");
       captureMessage("last_used_bump_failure", {
         level: "warning",
         tags: {
           tenant_id: ctx.tenant.id,
           token_id: tokenId,
         },
-        extra: { cause: String(err) },
+        extra: { cause: summarizeErrorForObs(err) },
       });
     }
   }

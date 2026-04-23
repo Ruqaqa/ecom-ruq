@@ -114,7 +114,7 @@ export async function runWithAudit<T>(args: RunWithAuditArgs<T>): Promise<T> {
       // but surfacing here too is a belt-and-braces guard so both
       // transports see equivalent observability if the inner shim
       // ever stops swallowing. Decision 1 (A) — unified here.
-      const { captureMessage } = await import("@/server/obs/sentry");
+      const { captureMessage, summarizeErrorForObs } = await import("@/server/obs/sentry");
       captureMessage("audit_write_failure", {
         level: "error",
         tags: {
@@ -128,7 +128,7 @@ export async function runWithAudit<T>(args: RunWithAuditArgs<T>): Promise<T> {
           actor_id: args.actor.actorId,
           token_id: args.actor.tokenId,
           raw_input_bytes: rawInputBytes(args.successInput),
-          cause: String(auditErr),
+          cause: summarizeErrorForObs(auditErr),
         },
       });
     });

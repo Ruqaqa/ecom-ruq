@@ -64,8 +64,14 @@ export async function withTenant<T>(
 ): Promise<T> {
   const outer = activeTenantStorage.getStore();
   if (outer !== undefined) {
+    // Chunk 9 (observability prep): the outer tenant UUID goes in `cause`,
+    // not the message string. Production error loggers surface `message`
+    // verbatim (and would leak the UUID to stdout/Sentry); `cause` is
+    // developer-inspectable locally but does not round-trip through the
+    // wire format by default.
     throw new Error(
-      `withTenant is flat-only; already inside a withTenant scope for tenant ${outer}. Service fns must receive the existing tx.`,
+      "withTenant is flat-only; already inside a withTenant scope. Service fns must receive the existing tx.",
+      { cause: { outerTenantId: outer } },
     );
   }
   return activeTenantStorage.run(ctx.tenantId, () =>

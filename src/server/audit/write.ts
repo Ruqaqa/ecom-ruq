@@ -182,7 +182,7 @@ export async function writeAuditInOwnTx(row: AuditWriteInput): Promise<void> {
   try {
     await withTenant(appDb, ctx, async (tx) => insertAuditInTx(tx, row));
   } catch (auditErr) {
-    const { captureMessage } = await import("@/server/obs/sentry");
+    const { captureMessage, summarizeErrorForObs } = await import("@/server/obs/sentry");
     captureMessage("audit_write_failure", {
       level: "error",
       tags: {
@@ -195,7 +195,7 @@ export async function writeAuditInOwnTx(row: AuditWriteInput): Promise<void> {
         actor_id: row.actorId,
         token_id: row.tokenId,
         raw_input_bytes: Buffer.byteLength(canonicalJson(row.input ?? null), "utf8"),
-        cause: String(auditErr),
+        cause: summarizeErrorForObs(auditErr),
       },
     });
   }

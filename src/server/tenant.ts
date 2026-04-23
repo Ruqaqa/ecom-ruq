@@ -153,6 +153,9 @@ export async function getTenant(): Promise<Tenant> {
   const h = await headers();
   const host = h.get("host");
   const tenant = await resolveTenant(host);
-  if (!tenant) throw new Error(`unknown host: ${host ?? "<missing>"}`);
+  // Chunk 9 (observability prep): the raw host (which identifies a tenant)
+  // goes in `cause`, not the message string. Callers that catch + log this
+  // see "unknown host" only; local dev still sees the host via `err.cause`.
+  if (!tenant) throw new Error("unknown host", { cause: { host: host ?? null } });
   return tenant;
 }

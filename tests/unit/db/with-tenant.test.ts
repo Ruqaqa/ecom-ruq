@@ -57,4 +57,34 @@ describe("withTenant", () => {
       }),
     ).rejects.toThrow(/flat-only/);
   });
+
+  it("nested-scope throw does NOT embed the outer tenantId in its message (chunk 9)", async () => {
+    const outerTenantId = randomUUID();
+    const outerCtx = buildAuthedTenantContext(
+      { id: outerTenantId },
+      { userId: null, actorType: "anonymous", tokenId: null, role: "anonymous" },
+    );
+    const innerCtx = buildAuthedTenantContext(
+      { id: randomUUID() },
+      { userId: null, actorType: "anonymous", tokenId: null, role: "anonymous" },
+    );
+
+    let thrown: unknown = null;
+    try {
+      await withTenant(db, outerCtx, async () => {
+        return withTenant(db, innerCtx, async () => null);
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const err = thrown as Error;
+    // Message must NOT contain the tenant UUID — that would leak to stdout
+    // / Sentry verbatim on any unhandled throw.
+    expect(err.message).not.toContain(outerTenantId);
+    // Developer diagnostic is preserved via `cause`, which loggers do not
+    // typically round-trip through the wire format by default.
+    expect(err.cause).toEqual({ outerTenantId });
+  });
 });
