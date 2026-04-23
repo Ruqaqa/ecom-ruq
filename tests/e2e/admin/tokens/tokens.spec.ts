@@ -551,6 +551,51 @@ test("touch targets — copy / ack / revoke / submit are ≥ 44×44 on mobile", 
   expect(revokeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
 });
 
+for (const locale of ["en", "ar"] as const) {
+  test(`owner-confirm resets when scope-role toggles away and back — ${locale}`, async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await signIn(page, locale, OWNER_EMAIL);
+    await page.goto(`/${locale}/admin/tokens`);
+    const newButton = page.getByRole("button", { name: expected[locale].newButton });
+    await expect(newButton).toBeEnabled({ timeout: 30_000 });
+    await newButton.click();
+
+    await expect(
+      page.getByRole("heading", { name: expected[locale].createHeading }),
+    ).toBeVisible();
+    await expectAxeClean(page);
+
+    await page.getByLabel(expected[locale].nameLabel, { exact: true }).fill(
+      testTokenName(`owner-confirm-reset-${locale}`),
+    );
+
+    // owner → tick confirm → staff (no confirm shown) → back to owner.
+    // The checkbox must re-render UNTICKED.
+    await page.selectOption("select[name='scopeRole']", "owner");
+    const confirmLabel = page.getByLabel(expected[locale].ownerConfirmLabel, { exact: true });
+    await confirmLabel.check();
+    await expect(confirmLabel).toBeChecked();
+
+    await page.selectOption("select[name='scopeRole']", "staff");
+    // The owner confirm label is not rendered while role=staff.
+    await expect(confirmLabel).toHaveCount(0);
+
+    await page.selectOption("select[name='scopeRole']", "owner");
+    // Fresh instance after the re-render — must be unchecked.
+    const confirmAgain = page.getByLabel(expected[locale].ownerConfirmLabel, { exact: true });
+    await expect(confirmAgain).toBeVisible();
+    await expect(confirmAgain).not.toBeChecked();
+
+    // Submitting without re-ticking surfaces an inline error and does
+    // NOT reach the server.
+    await page.getByRole("button", { name: expected[locale].submitCreate }).click();
+    await expect(page.locator("#token-owner-confirm-error")).toBeVisible();
+    await expect(page.getByRole("heading", { name: expected[locale].revealHeading })).toHaveCount(0);
+  });
+}
+
 test("staff-role view — list visible, create/revoke hidden", async ({ page }) => {
   test.setTimeout(45_000);
   await signIn(page, "en", STAFF_EMAIL);

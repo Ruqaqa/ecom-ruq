@@ -186,7 +186,15 @@ export function CreateTokenForm({ onSuccess, onCancel }: Props) {
           id="token-scope-role"
           name="scopeRole"
           value={scopeRole}
-          onChange={(e) => setScopeRole(e.target.value as ScopeRole)}
+          onChange={(e) => {
+            // L-3 (7.6.6): reset the owner-consent checkbox on every
+            // role change. Otherwise a user who ticked "confirm owner",
+            // switched away, and switched back would carry stale
+            // consent forward — server Zod still re-enforces, but the
+            // click happened at a prior moment. Clear on every change.
+            setScopeRole(e.target.value as ScopeRole);
+            setOwnerScopeConfirm(false);
+          }}
           aria-describedby="token-scope-role-helper"
           className="mt-1 block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-950"
         >

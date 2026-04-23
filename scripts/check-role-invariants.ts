@@ -21,10 +21,9 @@
  *        violation (reading the field elsewhere would bypass deriveRole).
  *
  *   R-4: `withPreAuthTenant` is allowed ONLY in src/server/db/index.ts
- *        (definition) and the three pre-auth callsites:
- *        src/server/auth/bearer-lookup.ts, src/server/auth/membership.ts,
- *        src/server/auth/last-used-debounce.ts. Closes dynamic-import
- *        and re-export laundering in one grep.
+ *        (definition) and the two pre-auth callsites:
+ *        src/server/auth/bearer-lookup.ts, src/server/auth/membership.ts.
+ *        Closes dynamic-import and re-export laundering in one grep.
  *
  * Comment-line handling: all three rules skip lines whose trimmed form
  * starts with `//` or `*` (JSDoc / inline-comment chatter mentions these
@@ -150,7 +149,7 @@ export async function checkRoleInvariants(
   );
 
   // R-4: withPreAuthTenant may only appear in the definition file or
-  // in the three pre-auth callsites. Closes dynamic-import evasion and
+  // in the two pre-auth callsites. Closes dynamic-import evasion and
   // re-export laundering in one grep because any surface that names
   // the symbol is caught.
   const r4AllowedFiles = new Set(
@@ -158,7 +157,6 @@ export async function checkRoleInvariants(
       path.join(serverDir, "db", "index.ts"),
       path.join(serverDir, "auth", "bearer-lookup.ts"),
       path.join(serverDir, "auth", "membership.ts"),
-      path.join(serverDir, "auth", "last-used-debounce.ts"),
     ].map((p) => path.resolve(p)),
   );
   const r4 = await scanRule(

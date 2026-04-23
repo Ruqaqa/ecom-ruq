@@ -47,8 +47,8 @@ session-only").
 6. If you're granting the experimental `tools` scope, a second
    `experimentalToolsConfirm` tick is required (same reasoning).
 7. Submit. The plaintext token appears **once**, prefixed with
-   `ru_`. Copy it. There is no second chance — revoke and mint again
-   if you miss the copy.
+   `eruq_pat_`. Copy it. There is no second chance — revoke and mint
+   again if you miss the copy.
 8. Paste an "I've saved this token" confirmation to dismiss the
    reveal panel. Leaving the panel open does NOT leak — the plaintext
    lives only in React state, never in localStorage, URL, or the RSC
@@ -243,11 +243,12 @@ cannot be minted wider than the minter's current capabilities.
 
 The MCP `authorize` contract across tools will also migrate: each
 tool's `isVisibleFor` / `authorize` will ask "does the caller hold
-permission X?" rather than "is the caller role R?". Whether this
-migration extracts a shared `requireWritePermission` helper (parallel
-to tRPC's `requireRole` → `requirePermission`) or keeps each tool
-owning its own check is a 7.6.3 CP-review call — see `auth.md`
-§"Parallel-path question for MCP".
+permission X?" rather than "is the caller role R?". Per 7.6.3
+CP-review (Option B): each tool owns its own `authorize` hook, and
+the Phase 7 migration touches each tool's hook individually. The
+MCP-side contract is the `McpTool.authorize` interface itself;
+tRPC's is `requireRole`. See `auth.md` §"Parallel-path question
+for MCP — resolved 7.6.3 CP-review (Option B)".
 
 ## See also
 

@@ -13,27 +13,30 @@
  *   - revealedToken: the plaintext of a just-minted PAT (nullable)
  *   - revokeTarget: { id, name } of a row the user is confirming revoke for
  *
- * Role branching (tightened in 7.6.2):
+ * Role branching (tightened in 7.6.2, renamed to non-owner in 7.6.6):
  *   - owner: sees everything (list + create + revoke).
- *   - staff: sees a "tokens are owner-only" notice. No list query, no
- *     create button, no revoke action. Server-side role gate is the
- *     source of truth — this is a UX optimization so staff don't see
- *     an empty list that would then FORBID on refresh anyway.
+ *   - non-owner (staff / support / any future non-owner membership role):
+ *     sees a "tokens are owner-only" notice. No list query, no create
+ *     button, no revoke action. Server-side role gate is the source of
+ *     truth — this is a UX optimization so non-owners don't see an
+ *     empty list that would then FORBID on refresh anyway.
  */
 "use client";
 
 import { useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
-import type { Locale } from "@/i18n/routing";
 import { trpc } from "@/lib/trpc/client";
 import { CreateTokenForm } from "./create-token-form";
 import { RevealTokenPanel } from "./reveal-token-panel";
 import { RevokeConfirmDialog } from "./revoke-confirm-dialog";
 
-export type ViewerRole = "owner" | "staff";
+// I-4 (7.6.6): `non-owner` (not `staff`) captures the actual runtime
+// shape — support and any future non-owner membership role all share
+// the same read-only view of this page. The server-side role gate
+// remains authoritative; this type is the client-side UX branch.
+export type ViewerRole = "owner" | "non-owner";
 
 interface Props {
-  locale: Locale;
   viewerRole: ViewerRole;
 }
 
@@ -44,7 +47,6 @@ export interface MintedTokenView {
 }
 
 export function TokensClient({ viewerRole }: Props) {
-  void (undefined as unknown as Locale); // keep `locale` typed in signature for future i18n-aware URL building
   const t = useTranslations("admin.tokens");
   const format = useFormatter();
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -110,26 +112,27 @@ export function TokensClient({ viewerRole }: Props) {
     );
   }
 
+  // Non-owner already early-returned above — the rest of this tree is
+  // owner-only by construction. The server-side role gate on
+  // tokens.list / tokens.create / tokens.revoke is the source of truth.
   return (
     <div className="space-y-6">
-      {viewerRole === "owner" ? (
-        <div>
-          {!showCreateForm ? (
-            <button
-              type="button"
-              onClick={() => setShowCreateForm(true)}
-              className="flex h-11 min-w-[44px] items-center justify-center rounded-md bg-neutral-900 px-4 text-base font-medium text-white dark:bg-white dark:text-neutral-900"
-            >
-              {t("newButton")}
-            </button>
-          ) : (
-            <CreateTokenForm
-              onSuccess={onMintSuccess}
-              onCancel={() => setShowCreateForm(false)}
-            />
-          )}
-        </div>
-      ) : null}
+      <div>
+        {!showCreateForm ? (
+          <button
+            type="button"
+            onClick={() => setShowCreateForm(true)}
+            className="flex h-11 min-w-[44px] items-center justify-center rounded-md bg-neutral-900 px-4 text-base font-medium text-white dark:bg-white dark:text-neutral-900"
+          >
+            {t("newButton")}
+          </button>
+        ) : (
+          <CreateTokenForm
+            onSuccess={onMintSuccess}
+            onCancel={() => setShowCreateForm(false)}
+          />
+        )}
+      </div>
 
       <section aria-labelledby="active-tokens-heading">
         <h2 id="active-tokens-heading" className="text-lg font-medium">
@@ -186,15 +189,13 @@ export function TokensClient({ viewerRole }: Props) {
                       </span>
                     </p>
                   </div>
-                  {viewerRole === "owner" ? (
-                    <button
-                      type="button"
-                      onClick={() => setRevokeTarget({ id: row.id, name: row.name })}
-                      className="flex h-11 min-w-[44px] items-center justify-center rounded-md border border-red-300 px-4 text-sm font-medium text-red-700 dark:border-red-700 dark:text-red-400"
-                    >
-                      {t("revokeButton")}
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setRevokeTarget({ id: row.id, name: row.name })}
+                    className="flex h-11 min-w-[44px] items-center justify-center rounded-md border border-red-300 px-4 text-sm font-medium text-red-700 dark:border-red-700 dark:text-red-400"
+                  >
+                    {t("revokeButton")}
+                  </button>
                 </div>
               </li>
             ))}

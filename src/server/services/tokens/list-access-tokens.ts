@@ -17,6 +17,7 @@
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { accessTokens } from "@/server/db/schema/tokens";
+import { TOOL_ALLOWLIST } from "@/server/services/tokens/create-access-token";
 import { TRPCError } from "@trpc/server";
 import type { Tx } from "@/server/db";
 import type { Role } from "@/server/tenant/context";
@@ -33,7 +34,10 @@ export const AccessTokenListItemSchema = z.object({
   tokenPrefix: z.string(),
   scopes: z.object({
     role: z.enum(["owner", "staff", "support"]),
-    tools: z.array(z.string()).optional(),
+    // Tier-B fail-loud: if TOOL_ALLOWLIST ever shrinks (a tool is
+    // deprecated), old rows with now-deprecated tool names must
+    // fail .parse rather than display in the admin UI as if live.
+    tools: z.array(z.enum(TOOL_ALLOWLIST)).optional(),
   }),
   lastUsedAt: z.date().nullable(),
   expiresAt: z.date().nullable(),

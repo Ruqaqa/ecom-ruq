@@ -90,10 +90,9 @@ export async function withTenant<T>(
  * queries issued BEFORE a bearer token is verified (and therefore before
  * an `AuthedTenantContext` can be constructed).
  *
- * CALLABLE ONLY FROM these three pre-auth sites:
+ * CALLABLE ONLY FROM these two pre-auth sites:
  *   - `src/server/auth/bearer-lookup.ts`   (PAT → access_tokens + memberships join)
  *   - `src/server/auth/membership.ts`      (session cookie → memberships lookup)
- *   - `src/server/auth/last-used-debounce.ts` (access_tokens.last_used_at bump)
  *
  * Any other callsite is rejected by the R-4 AST-walk invariant in
  * `scripts/check-role-invariants.ts`. Do not route around it.

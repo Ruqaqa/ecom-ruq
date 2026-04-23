@@ -148,13 +148,24 @@ export async function dispatchTool<TIn, TOut>(
   let result: TOut;
   try {
     if (config.auditMode === "mutation" && appDb) {
+      // Unreachable under the HTTP route's anonymous-reject at
+      // route.ts; explicit throw so a future refactor fails loud,
+      // not silent. A mutation-mode dispatch with a non-bearer
+      // identity would otherwise silently coerce to role:"anonymous"
+      // and feed that through the audit row (O-8, 7.6.6).
+      if (ctx.identity.type !== "bearer") {
+        throw new McpError(
+          "internal_error",
+          "mutation-mode dispatch with non-bearer identity",
+        );
+      }
       const authedCtx = buildAuthedTenantContext(
         { id: ctx.tenant.id },
         {
           userId: actor.actorId,
           actorType: actor.actorType,
           tokenId: actor.tokenId,
-          role: ctx.identity.type === "bearer" ? ctx.identity.role : "anonymous",
+          role: ctx.identity.role,
         },
       );
       result = await runWithAudit<TOut>({

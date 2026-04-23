@@ -21,7 +21,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { routing, type Locale } from "@/i18n/routing";
+import { routing } from "@/i18n/routing";
 import { resolveTenant } from "@/server/tenant";
 import { resolveRequestIdentity } from "@/server/auth/resolve-request-identity";
 import { resolveMembership } from "@/server/auth/membership";
@@ -56,7 +56,9 @@ export default async function AdminTokensPage({
   const identity = await resolveRequestIdentity(h, tenant);
   if (identity.type === "anonymous") redirect(`/${locale}/signin`);
   const membership = await resolveMembership(identity.userId, tenant.id);
-  const role: ViewerRole = membership?.role === "owner" ? "owner" : "staff";
+  // I-4 (7.6.6): non-owner captures staff + support + any future non-
+  // owner membership role. Server-side role gate remains authoritative.
+  const role: ViewerRole = membership?.role === "owner" ? "owner" : "non-owner";
 
   return (
     <main className="flex min-h-screen items-start justify-center p-6 pt-12">
@@ -64,7 +66,7 @@ export default async function AdminTokensPage({
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{t("subtitle")}</p>
         <div className="mt-6">
-          <TokensClient locale={locale as Locale} viewerRole={role} />
+          <TokensClient viewerRole={role} />
         </div>
       </div>
     </main>

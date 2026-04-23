@@ -148,7 +148,7 @@ describe("check-role-invariants fixture scanner", () => {
     expect(v.snippet).toMatch(/identity\.effectiveRole/);
   });
 
-  it("5. R-4 allow — definition in src/server/db/index.ts and the three callsites are permitted", async () => {
+  it("5. R-4 allow — definition in src/server/db/index.ts and the two callsites are permitted", async () => {
     fixture = await makeFixture({
       "src/server/trpc/ctx-role.ts": BLESSED_CTX_ROLE,
       "src/server/auth/resolve-request-identity.ts": BLESSED_RESOLVE,
@@ -162,10 +162,6 @@ describe("check-role-invariants fixture scanner", () => {
       "src/server/auth/membership.ts": `
         import { withPreAuthTenant } from "@/server/db";
         export const resolve = () => withPreAuthTenant;
-      `,
-      "src/server/auth/last-used-debounce.ts": `
-        import { withPreAuthTenant } from "@/server/db";
-        export const bump = () => withPreAuthTenant;
       `,
     });
     const violations = await checkRoleInvariants({ root: fixture.root });

@@ -621,31 +621,31 @@ gates to permission-identity checks. To keep that migration
 surgical, all role gates in Phase 0–6 must route through a single
 authorization helper — never inline." 7.6.2 delivers that helper.
 
-### Parallel-path question for MCP — deferred to 7.6.3 CP-review
+### Parallel-path question for MCP — resolved 7.6.3 CP-review (Option B)
 
 `requireRole` is tRPC-only. The MCP adapter's tools each own their
-own `authorize` + `isVisibleFor` hooks and read
-`ctx.identity.role` directly (not through `deriveRole(ctx)`). MCP
-identity is bearer-only by construction — the `identity: 'session'`
-constraint has no meaning there. So prd §3.6's "single authorization
-helper" wording is NOT literally true across both transports after
-7.6.2 lands.
+own `authorize` + `isVisibleFor` hooks and read `ctx.identity.role`
+directly (not through `deriveRole(ctx)`). MCP identity is bearer-only
+by construction — the `identity: 'session'` constraint has no meaning
+there.
 
-Two ways to resolve in 7.6.3 CP-review:
-- **Option A:** extract `requireWriteRole(ctx)` as the MCP peer of
-  `requireRole`. Each tool calls it instead of inlining the role check.
-- **Option B:** name the MCP tool `authorize` contract itself as the
-  per-transport single helper, and document that §3.6's "single
-  helper" applies per-transport rather than globally.
+**Resolution: Option B.** The per-tool `authorize` contract on the
+`McpTool` interface IS the MCP-side single helper. Each tool owns
+its gate logic (e.g., `create_product` gates on role; `run_sql_readonly`
+gates on role + scopes.tools + env flag), because MCP's closed set of
+tools have bespoke gate shapes that a shared helper would either
+constrain unnecessarily or thin-wrap without value. §3.6 now reads
+"single authorization contract per transport" — literally true on
+both sides.
 
-Either is defensible. Pick one during 7.6.3 and codify in §3.6 +
-`mcp-server.md`.
+### Future `tokens.*` transports — re-evaluation invariant
 
-### Future `tokens.*` transports — re-evaluation required
+**Invariant.** Adding a new transport for `tokens.*` (webhook,
+admin-API, internal RPC) requires re-evaluating session-only at THAT
+transport's gate — service-layer admits any identity with sufficient
+role; identity-type narrowing is adapter-only.
+`requireRole({ identity: 'session' })` is tRPC-specific.
 
-Any new transport that exposes `tokens.*` in Phase 1+ (webhook,
-admin-API, internal RPC) must re-evaluate session-only enforcement
-at the new transport gate. `requireRole({ identity: 'session' })`
-is tRPC-specific. The service-layer gate checks role but NOT identity
-type — that's an adapter concern by architecture decision. 7.6.3
-CP-review + chunk 9 CI env-lint log this as a recurring checkpoint.
+Enforcement: chunk 9 CI env-lint logs this as a recurring checkpoint;
+Phase 7 RBAC migration re-verifies on the `tokens.manage` permission
+path.
