@@ -31,7 +31,7 @@
  * Writers MUST run inside the service adapter's transaction. Never write
  * audit directly from a service function — see src/server/services/README.md.
  */
-import { pgTable, uuid, text, timestamp, jsonb, index, primaryKey, check } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb, index, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 import { bytea } from "./_types";
@@ -76,6 +76,11 @@ export const auditLog = pgTable(
 export const auditPayloads = pgTable(
   "audit_payloads",
   {
+    // Surrogate PK (migration 0008). Two audit_log rows may deliberately share
+    // a correlationId (see sessionCreateAfter magic-link branch) and each needs
+    // its own input/before/after detail rows; the previous composite PK on
+    // (correlation_id, kind) collided and rolled back the losing write.
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     correlationId: uuid("correlation_id").notNull(),
     kind: text("kind").notNull(),
     tenantId: uuid("tenant_id")
@@ -85,7 +90,7 @@ export const auditPayloads = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.correlationId, t.kind] }),
+    index("audit_payloads_correlation_id_kind_idx").on(t.correlationId, t.kind),
     index("audit_payloads_tenant_id_idx").on(t.tenantId),
     check("audit_payloads_kind_check", sql`${t.kind} IN ('input','before','after')`),
   ],
