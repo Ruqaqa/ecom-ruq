@@ -56,17 +56,32 @@ import { deriveRole } from "../ctx-role";
  * on `ctx`. On non-mutation paths where we short-circuit, `tx` /
  * `authedCtx` are null — the narrow type reflects that so consumers
  * handle both states.
+ *
+ * `auditPayloads` is a mutable holder a procedure can write to when its
+ * wire-return shape and its audit shape diverge — e.g. updateProduct
+ * returns a Tier-B-stripped wire shape but wants the full pre/post row
+ * recorded in the audit chain. Procedures that don't set it fall back
+ * to using the wire return as both `result` and `after` (no `before`).
  */
+export interface AuditWrapAuditPayloads {
+  /** Override for the `after` audit payload. Falls back to the wire return. */
+  after?: unknown;
+  /** Optional `before` audit payload — recorded as `audit_payloads.kind = 'before'`. */
+  before?: unknown;
+}
+
 export interface AuditWrapContextOverride {
   tx: Tx | null;
   authedCtx: AuthedTenantContext | null;
   correlationId: string | null;
+  auditPayloads: AuditWrapAuditPayloads | null;
 }
 
 const EMPTY_OVERRIDE: AuditWrapContextOverride = {
   tx: null,
   authedCtx: null,
   correlationId: null,
+  auditPayloads: null,
 };
 
 function deriveActor(ctx: Pick<TRPCContext, "identity">): {
@@ -138,6 +153,10 @@ export const auditWrap = middleware(async ({ ctx, path, type, getRawInput, next 
   type MiddlewareResult = Awaited<ReturnType<typeof next>>;
   let capturedResult: MiddlewareResult | null = null;
 
+  // Mutable holder a procedure can populate to override the audit
+  // shape — see AuditWrapAuditPayloads.
+  const auditPayloads: AuditWrapAuditPayloads = {};
+
   await runWithAudit<MiddlewareResult>({
     db: appDb,
     authedCtx,
@@ -153,11 +172,27 @@ export const auditWrap = middleware(async ({ ctx, path, type, getRawInput, next 
       failureInput: inputForFailure(err),
     }),
     work: async (tx: Tx) => {
-      const override: AuditWrapContextOverride = { tx, authedCtx, correlationId };
+      const override: AuditWrapContextOverride = {
+        tx,
+        authedCtx,
+        correlationId,
+        auditPayloads,
+      };
       const result = await next({ ctx: override });
       if (!result.ok) throw result.error;
       capturedResult = result;
-      return { result, after: result.data };
+      // Procedure-set `after` overrides the wire return (e.g.
+      // updateProduct sets the full Tier-B row even when the wire
+      // return is the role-gated subset).
+      const after =
+        auditPayloads.after !== undefined ? auditPayloads.after : result.data;
+      return {
+        result,
+        after,
+        ...(auditPayloads.before !== undefined
+          ? { before: auditPayloads.before }
+          : {}),
+      };
     },
   });
 
@@ -206,10 +241,15 @@ const narrowMutationContext = auditWrap.unstable_pipe(async ({ ctx, next, type }
       message: "mutationProcedure invoked as non-mutation",
     });
   }
-  if (ctx.tx === null || ctx.authedCtx === null || ctx.correlationId === null) {
+  if (
+    ctx.tx === null ||
+    ctx.authedCtx === null ||
+    ctx.correlationId === null ||
+    ctx.auditPayloads === null
+  ) {
     throw new TRPCError({
       code: "INTERNAL_SERVER_ERROR",
-      message: "auditWrap invariant broken: ctx.tx / authedCtx / correlationId missing",
+      message: "auditWrap invariant broken: ctx.tx / authedCtx / correlationId / auditPayloads missing",
     });
   }
   return next({
@@ -217,6 +257,7 @@ const narrowMutationContext = auditWrap.unstable_pipe(async ({ ctx, next, type }
       tx: ctx.tx,
       authedCtx: ctx.authedCtx,
       correlationId: ctx.correlationId,
+      auditPayloads: ctx.auditPayloads,
     },
   });
 });

@@ -292,8 +292,10 @@ describe("MCP list_products integration", () => {
     expect((content as { items: unknown[] }).items.length).toBe(2);
     expect(content).toHaveProperty("hasMore");
     expect(content).toHaveProperty("nextCursor");
-    // Owner/staff items include the Tier-B field even though every
-    // value in this fixture is null.
+    // Owner-only Tier-B field (post-1a.2 alignment with prd §6.5).
+    // Staff would NOT see this column; this case is owner so the
+    // field is present even though every value in this fixture is
+    // null.
     const items = (content as { items: Array<Record<string, unknown>> }).items;
     expect(items[0]).toHaveProperty("costPriceMinor");
 

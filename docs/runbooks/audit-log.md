@@ -71,3 +71,77 @@ chain heads against the witnessed heads.
 Until that lands, the tamper-evidence story relies on the append-only
 triggers + the REVOKE TRUNCATE + the SECURITY DEFINER scrub path — none of
 which defend against a DB superuser acting in bad faith.
+
+## Closed-set `error` codes
+
+The `audit_log.error` column is populated only from a closed set of
+strings (see `src/server/audit/error-codes.ts`):
+
+| code                    | meaning                                                                   |
+|-------------------------|---------------------------------------------------------------------------|
+| `validation_failed`     | input rejected by Zod (transport-level or service-level).                 |
+| `not_found`             | row not present, or hidden by tenant scope / RLS / soft-delete.           |
+| `forbidden`             | authn/authz refused (anonymous, missing membership, role too low).        |
+| `conflict`              | uniqueness constraint violated — e.g. slug already taken in same tenant.  |
+| `stale_write`           | optimistic-concurrency token did not match — the row advanced underneath. |
+| `rls_denied`            | pg 42501 from RLS WITH CHECK or USING.                                    |
+| `rate_limited`          | sliding-window rate limit triggered.                                      |
+| `serialization_failure` | pg 40001 — concurrent transaction conflict.                               |
+| `internal_error`        | catch-all; the cause is in Sentry, never in `audit_log`.                  |
+
+Operator dashboards can grep on these codes to split error categories
+without parsing free-form messages.
+
+### `stale_write` — added in chunk 1a.2
+
+`updateProduct` introduces an `expectedUpdatedAt` parameter. The UPDATE's
+WHERE clause includes `updated_at = $expected`; an empty RETURNING set is
+disambiguated by a follow-up SELECT:
+
+- row no longer present → `not_found` (typed `TRPCError NOT_FOUND` /
+  MCP `not_found` / JSON-RPC -32004)
+- row present but `updated_at` advanced → `stale_write` (typed
+  `StaleWriteError` → wire `TRPCError CONFLICT message="stale_write"` /
+  MCP `stale_write` / JSON-RPC -32009; audit row error
+  `{"code":"stale_write"}`)
+
+`stale_write` is intentionally distinct from `conflict` so dashboards can
+separate "the operator raced themselves between two tabs" (low-signal,
+expected) from "two operators tried to register the same slug" (which may
+indicate a clobbered redirect or coordination bug).
+
+### Cursor interaction
+
+The product-list cursor in chunk 1a.1 is `(updated_at, id)` DESC. After a
+successful `updateProduct`, the row's `updated_at` advances, so it jumps
+to the top of the list. A user navigating a stale cursor may see the
+freshly-edited row reappear on page 1 — acceptable UX for "newest-edited
+first." No code change is needed in 1a.2.
+
+### Invariant: preserve `cause` when re-wrapping `StaleWriteError`
+
+The audit-code mapper for `products.update` (and any future
+`updateXxx` service that uses optimistic concurrency) classifies a
+stale-write event by walking the error's cause chain:
+
+```ts
+err instanceof StaleWriteError ||
+  (err instanceof TRPCError && err.cause instanceof StaleWriteError)
+```
+
+The tRPC procedure deliberately translates `StaleWriteError` into
+`TRPCError({ code: "CONFLICT", message: "stale_write", cause: err })`
+so wire clients see a usable status code while the audit mapper still
+sees the typed signal via `cause`.
+
+**Future middleware that catches and re-throws service errors inside a
+tRPC procedure must preserve the cause when adding its own.** Dropping
+the cause silently demotes the audit row from `stale_write` to either
+`internal_error` (raw error) or `conflict` (raw `TRPCError CONFLICT`
+without cause). Operator dashboards lose the ability to separate
+"raced operator between two tabs" (low signal) from "two operators
+fighting over the same slug" (escalation candidate).
+
+The MCP path is unaffected — `dispatchTool`'s `toMcpError` wrapper
+sees `StaleWriteError` directly because MCP procedures throw it bare;
+no cause-walking required there.

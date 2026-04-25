@@ -19,6 +19,7 @@
  *   - McpError.kind = "conflict"                                → -32006
  *   - McpError.kind = "rls_denied"                              → -32007
  *   - McpError.kind = "serialization_failure"                   → -32008
+ *   - McpError.kind = "stale_write"                             → -32009
  *   - McpError.kind = "internal_error"                          → -32603
  *
  * Separately, the adapter-neutral dispatcher (Block 7 part B) maps any
@@ -40,6 +41,7 @@ export type McpErrorKind =
   | "rate_limited"
   | "validation_failed"
   | "conflict"
+  | "stale_write"
   | "rls_denied"
   | "serialization_failure"
   | "internal_error";
@@ -98,6 +100,7 @@ export function auditErrorCodeToMcpKind(code: AuditErrorCode): McpErrorKind {
     case "forbidden":             return "forbidden";
     case "rate_limited":          return "rate_limited";
     case "conflict":              return "conflict";
+    case "stale_write":           return "stale_write";
     case "rls_denied":            return "rls_denied";
     case "serialization_failure": return "serialization_failure";
     case "internal_error":        return "internal_error";
@@ -116,6 +119,7 @@ export function auditErrorCodeToJsonRpcCode(code: AuditErrorCode): number {
     case "conflict":              return -32006;
     case "rls_denied":            return -32007;
     case "serialization_failure": return -32008;
+    case "stale_write":           return -32009;
     case "internal_error":        return -32603;
   }
   // Compile-time exhaustiveness canary. If a ninth AuditErrorCode is
@@ -138,6 +142,7 @@ export function mcpErrorToJsonRpcCode(kind: McpErrorKind): number {
     case "conflict":               return -32006;
     case "rls_denied":             return -32007;
     case "serialization_failure": return -32008;
+    case "stale_write":            return -32009;
     case "internal_error":         return -32603;
   }
   // Same exhaustiveness canary shape.

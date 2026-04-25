@@ -26,7 +26,7 @@
  * avoiding the duplicated-switch drift risk.
  */
 import { TRPCError } from "@trpc/server";
-import type { AuditErrorCode } from "./error-codes";
+import { StaleWriteError, type AuditErrorCode } from "./error-codes";
 
 /**
  * 3-level `.cause` peel to find a pg SQLSTATE buried under TRPCError / a
@@ -63,6 +63,14 @@ function extractPgCode(x: unknown): string | undefined {
  * No fallthrough to err.message — see prd.md §3.7.
  */
 export function mapErrorToAuditCode(err: unknown): AuditErrorCode {
+  // StaleWriteError can either bubble directly (MCP) or sit in a
+  // TRPCError's `.cause` (tRPC procedures translate to a CONFLICT wire
+  // shape so clients get a usable status code; the cause-peel below
+  // recovers the typed signal for the audit mapper).
+  if (err instanceof StaleWriteError) return "stale_write";
+  if (err instanceof TRPCError && err.cause instanceof StaleWriteError) {
+    return "stale_write";
+  }
   if (err instanceof TRPCError) {
     switch (err.code) {
       case "BAD_REQUEST":

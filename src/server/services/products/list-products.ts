@@ -2,10 +2,16 @@
  * Cursor is an opaque base64url of `${updatedAtIso}::${id}`. Garbage
  * cursors silently fall back to the first page — the `?cursor=` param
  * is opaque to operators, so any garbage is equivalent to "start from
- * top". `limit+1` computes `hasMore` without a `count(*)`. Tier-B
- * (`cost_price_minor`) is gated at BOTH the SELECT column list AND the
- * output schema `.parse`, so it never crosses the wire for non-write
- * roles even if either gate is bypassed.
+ * top". `limit+1` computes `hasMore` without a `count(*)`.
+ *
+ * Tier-B (`cost_price_minor`) is OWNER-ONLY for reads, in line with
+ * prd §6.5 ("operator-only"): owners run margin math, staff don't.
+ * Staff and below see `ProductPublicSchema` (no costPriceMinor) even
+ * though they can list. The role-list (who's allowed to view at all)
+ * stays owner+staff via `isWriteRole` at the entry-point guard; only
+ * the COLUMN is owner-only. Gated at BOTH the SELECT column list AND
+ * the output schema `.parse`, so the column never crosses the wire
+ * for non-owner roles even if either gate is bypassed.
  */
 import { z } from "zod";
 import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
@@ -116,7 +122,7 @@ export async function listProductsUnsafe(
     );
   }
 
-  const writeRole = isWriteRole(role);
+  const ownerRole = role === "owner";
   const baseSelect = {
     id: products.id,
     slug: products.slug,
@@ -127,7 +133,7 @@ export async function listProductsUnsafe(
     createdAt: products.createdAt,
     updatedAt: products.updatedAt,
   };
-  const selectCols = writeRole
+  const selectCols = ownerRole
     ? { ...baseSelect, costPriceMinor: products.costPriceMinor }
     : baseSelect;
 
@@ -146,7 +152,7 @@ export async function listProductsUnsafe(
       ? encodeCursor(last.updatedAt as Date, last.id as string)
       : null;
 
-  if (writeRole) {
+  if (ownerRole) {
     return ListProductsOutputOwnerSchema.parse({
       items: page,
       nextCursor,

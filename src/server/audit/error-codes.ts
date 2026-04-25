@@ -13,7 +13,26 @@ export type AuditErrorCode =
   | "not_found"
   | "forbidden"
   | "conflict"
+  | "stale_write"
   | "rls_denied"
   | "rate_limited"
   | "serialization_failure"
   | "internal_error";
+
+/**
+ * Thrown by services when an optimistic-concurrency check fails: the
+ * row exists, but its `updated_at` advanced past the caller's
+ * `expectedUpdatedAt`. The audit mapper recognizes this class and
+ * stamps `error: { code: "stale_write" }` so operator dashboards can
+ * separate genuine slug-collision conflicts from raced writes.
+ *
+ * Carries no PII — name, message, and the optional context fields are
+ * safe-by-construction (set only by service code, never by user input).
+ */
+export class StaleWriteError extends Error {
+  public readonly stale = true as const;
+  constructor(message: string = "stale_write") {
+    super(message);
+    this.name = "StaleWriteError";
+  }
+}

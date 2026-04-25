@@ -56,6 +56,7 @@ const ctx: McpRequestContext = {
     scopes: { role: "owner" },
   },
   correlationId: "cid-f8",
+  auditOverride: {},
 };
 
 // Tool whose handler throws with the PAT embedded in err.message.

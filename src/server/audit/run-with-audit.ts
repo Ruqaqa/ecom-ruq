@@ -69,11 +69,15 @@ export interface RunWithAuditArgs<T> {
   onFailure(err: unknown): { errorCode: AuditErrorCode; failureInput: unknown };
   /**
    * The caller's unit of work. Runs inside the opened tx. Must return
-   * both the value the outer caller will receive AND the `after`
-   * payload the success audit row should record (often the same — the
-   * parsed output — but transport-specific so we keep them split).
+   * the value the outer caller will receive PLUS the `after` payload
+   * the success audit row should record (often the same — the parsed
+   * output — but transport-specific so we keep them split). Optionally
+   * returns a `before` payload — for write operations whose audit
+   * forensic value depends on the pre-update row state (chunk 1a.2's
+   * updateProduct, future delete/update flows). Reads / no-op writes
+   * leave `before` undefined.
    */
-  work(tx: Tx): Promise<{ result: T; after: unknown }>;
+  work(tx: Tx): Promise<{ result: T; after: unknown; before?: unknown }>;
 }
 
 function rawInputBytes(v: unknown): number {
@@ -83,7 +87,7 @@ function rawInputBytes(v: unknown): number {
 export async function runWithAudit<T>(args: RunWithAuditArgs<T>): Promise<T> {
   try {
     return await withTenant(args.db, args.authedCtx, async (tx) => {
-      const { result, after } = await args.work(tx);
+      const { result, after, before } = await args.work(tx);
       await insertAuditInTx(tx, {
         tenantId: args.tenantId,
         operation: args.operation,
@@ -93,6 +97,7 @@ export async function runWithAudit<T>(args: RunWithAuditArgs<T>): Promise<T> {
         outcome: "success",
         correlationId: args.correlationId,
         input: args.successInput,
+        ...(before !== undefined ? { before } : {}),
         after,
       });
       return result;

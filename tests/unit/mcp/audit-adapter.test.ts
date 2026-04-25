@@ -45,6 +45,7 @@ function ctxBearer(): McpRequestContext {
       scopes: { role: "owner" },
     },
     correlationId: "cid-1",
+    auditOverride: {},
   };
 }
 

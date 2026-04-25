@@ -36,6 +36,7 @@ function ctxAnonymous(): McpRequestContext {
     tenant,
     identity: { type: "anonymous" },
     correlationId: "cid-anon",
+    auditOverride: {},
   };
 }
 

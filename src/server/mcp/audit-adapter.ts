@@ -183,7 +183,20 @@ export async function dispatchTool<TIn, TOut>(
         work: async (tx) => {
           const handlerResult = await tool.handler(ctx, parsedInput, tx);
           const parsedOutput = tool.outputSchema.parse(handlerResult);
-          return { result: parsedOutput, after: parsedOutput };
+          // Tool may have populated ctx.auditOverride to record a
+          // different audit shape than the wire return — see
+          // McpAuditOverride.
+          const after =
+            ctx.auditOverride.after !== undefined
+              ? ctx.auditOverride.after
+              : parsedOutput;
+          return {
+            result: parsedOutput,
+            after,
+            ...(ctx.auditOverride.before !== undefined
+              ? { before: ctx.auditOverride.before }
+              : {}),
+          };
         },
       });
     } else {

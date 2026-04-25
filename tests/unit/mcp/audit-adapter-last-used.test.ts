@@ -109,6 +109,7 @@ function ctxBearer(tokenId: string): McpRequestContext {
       scopes: { role: "owner" },
     },
     correlationId: "cid-lu",
+    auditOverride: {},
   };
 }
 

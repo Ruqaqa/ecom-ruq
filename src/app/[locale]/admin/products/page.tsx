@@ -23,7 +23,7 @@ import {
 } from "@/server/tenant/context";
 import {
   listProducts,
-  type ListProductsOutputOwner,
+  type ListProductsOutput,
 } from "@/server/services/products/list-products";
 import { pickLocalizedName } from "@/lib/i18n/pick-localized-name";
 
@@ -44,6 +44,7 @@ export default async function AdminProductsListPage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<{
     createdId?: string | string[];
+    updatedId?: string | string[];
     cursor?: string | string[];
   }>;
 }) {
@@ -56,6 +57,8 @@ export default async function AdminProductsListPage({
 
   const rawCreated = sp.createdId;
   const createdId = Array.isArray(rawCreated) ? rawCreated[0] : rawCreated;
+  const rawUpdated = sp.updatedId;
+  const updatedId = Array.isArray(rawUpdated) ? rawUpdated[0] : rawUpdated;
   const rawCursor = sp.cursor;
   const cursor = Array.isArray(rawCursor) ? rawCursor[0] : rawCursor;
 
@@ -73,7 +76,7 @@ export default async function AdminProductsListPage({
     redirect(`/${rawLocale}/signin?denied=admin`);
   }
 
-  let page: ListProductsOutputOwner = {
+  let page: ListProductsOutput = {
     items: [],
     nextCursor: null,
     hasMore: false,
@@ -90,11 +93,14 @@ export default async function AdminProductsListPage({
       },
     );
     try {
-      // Role gated to owner/staff above, so the service returns the owner
-      // shape — safe cast.
-      page = (await withTenant(appDb, authedCtx, (tx) =>
+      // Owner sees the owner-shape envelope (cost_price_minor included);
+      // staff sees the public-shape envelope (column stripped per
+      // chunk-1a.2 alignment with prd §6.5). The list UI doesn't render
+      // cost-price either way, so the type union is the only thing that
+      // changes.
+      page = await withTenant(appDb, authedCtx, (tx) =>
         listProducts(tx, { id: tenant.id }, role, { cursor }),
-      )) as ListProductsOutputOwner;
+      );
     } catch {
       loadError = true;
     }
@@ -129,6 +135,16 @@ export default async function AdminProductsListPage({
             className="mt-6 rounded-md bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950 dark:text-green-300"
           >
             {t("createdMessage", { id: createdId })}
+          </p>
+        ) : null}
+
+        {updatedId ? (
+          <p
+            role="status"
+            data-testid="updated-product-message"
+            className="mt-6 rounded-md bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950 dark:text-green-300"
+          >
+            {t("updatedMessage", { name: updatedId })}
           </p>
         ) : null}
 
@@ -170,30 +186,36 @@ export default async function AdminProductsListPage({
                   <li
                     key={p.id}
                     data-testid="product-row"
-                    className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"
+                    className="rounded-lg border border-neutral-200 dark:border-neutral-800"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-base font-medium">
-                          {displayName}
-                        </p>
-                        <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
-                          {format.dateTime(p.updatedAt, dateOptions)} · {p.slug}
-                        </p>
+                    <Link
+                      href={`/${rawLocale}/admin/products/${p.id}`}
+                      data-testid="product-row-link"
+                      className="flex min-h-[44px] flex-col gap-2 rounded-lg p-4 hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-base font-medium">
+                            {displayName}
+                          </p>
+                          <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                            {format.dateTime(p.updatedAt, dateOptions)} · {p.slug}
+                          </p>
+                        </div>
+                        <StatusPill
+                          status={p.status}
+                          labels={{
+                            draft: t("status.draft"),
+                            active: t("status.active"),
+                          }}
+                        />
                       </div>
-                      <StatusPill
-                        status={p.status}
-                        labels={{
-                          draft: t("status.draft"),
-                          active: t("status.active"),
-                        }}
-                      />
-                    </div>
-                    {picked.isFallback ? (
-                      <p className="mt-2 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
-                        {t("translationMissing")}
-                      </p>
-                    ) : null}
+                      {picked.isFallback ? (
+                        <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                          {t("translationMissing")}
+                        </span>
+                      ) : null}
+                    </Link>
                   </li>
                 );
               })}
@@ -219,7 +241,13 @@ export default async function AdminProductsListPage({
                     return (
                       <tr key={p.id} data-testid="product-row">
                         <td className="px-4 py-3">
-                          <span className="block truncate">{displayName}</span>
+                          <Link
+                            href={`/${rawLocale}/admin/products/${p.id}`}
+                            data-testid="product-row-link"
+                            className="block truncate underline-offset-2 hover:underline"
+                          >
+                            {displayName}
+                          </Link>
                           {picked.isFallback ? (
                             <span className="mt-1 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
                               {t("translationMissing")}

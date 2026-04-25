@@ -24,8 +24,10 @@
  *      it). `.parse` throws on drift, which we prefer to a silent leak.
  */
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { products } from "@/server/db/schema/catalog";
 import { localizedText, localizedTextPartial } from "@/lib/i18n/localized";
+import { extractPgUniqueViolation } from "./pg-error-helpers";
 // Latin-only URL slug. Regex + length + leading/trailing/consecutive-
 // hyphen invariants all live in the shared `@/lib/product-slug`
 // module — same module the admin form imports for live validation.
@@ -99,17 +101,33 @@ export async function createProduct(
   input: CreateProductInput,
 ): Promise<ProductPublic | ProductOwner> {
   const parsed = CreateProductInputSchema.parse(input);
-  const rows = await tx
-    .insert(products)
-    .values({
-      tenantId: tenant.id,
-      slug: parsed.slug,
-      name: parsed.name,
-      description: parsed.description,
-      status: parsed.status,
-      categoryId: parsed.categoryId,
-    })
-    .returning();
+  let rows;
+  try {
+    rows = await tx
+      .insert(products)
+      .values({
+        tenantId: tenant.id,
+        slug: parsed.slug,
+        name: parsed.name,
+        description: parsed.description,
+        status: parsed.status,
+        categoryId: parsed.categoryId,
+      })
+      .returning();
+  } catch (err) {
+    // Slug collision → typed CONFLICT 'slug_taken' (closed-set wire
+    // message; never echoes the offending slug back). Audit-wrap's
+    // mapErrorToAuditCode still classifies pg 23505 → 'conflict'
+    // because the cause is preserved. Other DB errors bubble.
+    if (extractPgUniqueViolation(err, "products_tenant_slug_unique")) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "slug_taken",
+        cause: err,
+      });
+    }
+    throw err;
+  }
   const row = rows[0];
   if (!row) throw new Error("createProduct: insert returned no row");
 

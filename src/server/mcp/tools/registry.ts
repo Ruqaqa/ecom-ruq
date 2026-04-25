@@ -40,6 +40,7 @@ import type { Tx } from "@/server/db";
 import { dispatchTool, type ToolAuditConfig } from "../audit-adapter";
 import { pingTool } from "./ping";
 import { createProductTool } from "./create-product";
+import { updateProductTool } from "./update-product";
 import { listProductsTool } from "./list-products";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
@@ -74,6 +75,11 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   { tool: pingTool as McpTool<unknown, unknown>, audit: { auditMode: "none" } },
   {
     tool: createProductTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // 1a.2 — `update_product` mutation tool. auditMode:"mutation".
+  {
+    tool: updateProductTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
   // 1a.1 — `list_products` read tool. auditMode:"none"; Decision-1

@@ -6,9 +6,11 @@
  *   - ORDER BY updated_at DESC, id DESC (tie-break is load-bearing for
  *     cursor determinism — L-5).
  *   - WHERE deleted_at IS NULL (soft-delete filter from day one).
- *   - Role-gated SELECT: owner/staff SELECT includes cost_price_minor;
- *     every other role OMITS it (Tier-B never crosses the wire, even
- *     though 1a.1 only lets owner/staff reach this service).
+ *   - Role-gated SELECT (post-1a.2 alignment): ONLY owner SELECT
+ *     includes cost_price_minor; staff and below OMIT it. Cost-price
+ *     is owner-only for reads AND writes (prd §6.5 "operator-only").
+ *     Staff is still allowed to view the LIST itself — only the
+ *     column is owner-gated. Mirrors getProduct's gate.
  *   - Cursor shape: opaque base64url of `${updatedAtIso}::${id}`.
  *   - limit+1 technique for hasMore; no count(*) query.
  *   - Inner role check stays as defense-in-depth; primary gate lives at
@@ -125,7 +127,11 @@ describe("listProducts — service", () => {
     ).toBe(12345);
   });
 
-  it("staff role: same shape as owner (parity)", async () => {
+  it("staff role: list visible but Tier-B costPriceMinor stripped (owner-only column per prd §6.5)", async () => {
+    // Carry-over from chunk 1a.2: cost-price is owner-only for both
+    // reads and writes. Staff still sees the LIST (entry-point guard
+    // accepts owner+staff), but the COLUMN is gone — same gate in
+    // getProduct.
     const { listProducts } = await import(
       "@/server/services/products/list-products"
     );
@@ -137,7 +143,8 @@ describe("listProducts — service", () => {
     );
 
     expect(out.items.length).toBe(2);
-    expect("costPriceMinor" in out.items[0]!).toBe(true);
+    expect("costPriceMinor" in out.items[0]!).toBe(false);
+    expect(JSON.stringify(out)).not.toContain("12345");
   });
 
   it("customer role: inner defense-in-depth guard throws (primary gate lives at transport)", async () => {

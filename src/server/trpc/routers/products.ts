@@ -34,6 +34,7 @@
  * callers (`identity: 'any'` — the default) because mobile/MCP clients
  * need to create products. `tokens.*` is the opposite: session-only.
  */
+import { z } from "zod";
 import { router, publicProcedure, TRPCError } from "../init";
 import { mutationProcedure } from "../middleware/audit-wrap";
 import { requireRole } from "../middleware/require-role";
@@ -46,8 +47,14 @@ import {
   listProducts,
   ListProductsInputSchema,
 } from "@/server/services/products/list-products";
+import {
+  updateProduct,
+  UpdateProductInputSchema,
+} from "@/server/services/products/update-product";
+import { getProduct } from "@/server/services/products/get-product";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
+import { StaleWriteError } from "@/server/audit/error-codes";
 
 export const productsRouter = router({
   // Read path — no audit wrap (reads bypass audit per prd §3.7). Role
@@ -78,6 +85,73 @@ export const productsRouter = router({
       return withTenant(appDb, authedCtx, (tx) =>
         listProducts(tx, { id: ctx.tenant.id }, role, input),
       );
+    }),
+
+  // Read-by-id used by the RSC edit page to pre-fill the form. Owner/
+  // staff only — same identity:'any' rule as `list` so MCP/PAT callers
+  // can read for tooling but customers/anonymous can't probe ids.
+  get: publicProcedure
+    .use(requireRole({ roles: ["owner", "staff"], identity: "any" }))
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      if (!appDb) return null;
+      const { userId } = ctx.identity;
+      const tokenId =
+        ctx.identity.type === "bearer" ? ctx.identity.tokenId : null;
+      const authedCtx = buildAuthedTenantContext(
+        { id: ctx.tenant.id },
+        { userId, actorType: "user", tokenId, role },
+      );
+      return withTenant(appDb, authedCtx, (tx) =>
+        getProduct(tx, { id: ctx.tenant.id }, role, input),
+      );
+    }),
+
+  update: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(UpdateProductInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed — Tier-B gate integrity violated",
+        });
+      }
+      try {
+        const result = await updateProduct(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        // Override the audit shape: the wire return is the role-gated
+        // subset, but the audit chain records the full Tier-B before/
+        // after row regardless of caller role. See AuditWrapAuditPayloads.
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.audit;
+        return result.public;
+      } catch (err) {
+        if (err instanceof StaleWriteError) {
+          // Translate to CONFLICT for the wire (clients can recognize
+          // a usable status code); cause preserved so audit-wrap's
+          // mapErrorToAuditCode classifies as 'stale_write' rather
+          // than the generic 'internal_error' / 'conflict' branches.
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "stale_write",
+            cause: err,
+          });
+        }
+        throw err;
+      }
     }),
 
   create: mutationProcedure

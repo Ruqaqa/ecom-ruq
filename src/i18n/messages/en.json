@@ -72,6 +72,7 @@
       "list": {
         "title": "Products",
         "createdMessage": "Created: {id}",
+        "updatedMessage": "Saved: {name}",
         "createCta": "Create product",
         "empty": {
           "heading": "No products yet",
@@ -95,6 +96,27 @@
           "backToFirst": "Back to first page"
         },
         "error": "Could not load products. Try again in a moment."
+      },
+      "edit": {
+        "title": "Edit product",
+        "submit": "Save changes",
+        "cancel": "Cancel",
+        "costPriceLabel": "Cost price (minor units)",
+        "costPriceHelper": "Optional. Visible only to the owner. Used for margin calculations.",
+        "costPriceClear": "Clear",
+        "slugChangeWarning": "Changing the URL may break links to this product.",
+        "staleWriteError": "This product was changed by someone else. Refresh to see the latest version.",
+        "staleWriteRefresh": "Refresh",
+        "dirtyConfirmTitle": "Discard your changes?",
+        "dirtyConfirmBody": "You have unsaved edits. They will be lost if you leave this page.",
+        "discardConfirm": "Discard changes",
+        "keepEditing": "Keep editing",
+        "notFound": "This product no longer exists.",
+        "notFoundCta": "Back to products",
+        "loadError": "Could not load this product. Try again in a moment.",
+        "forbidden": "You don't have permission to edit products.",
+        "error": "Could not save your changes. Please check your inputs.",
+        "slugTaken": "That slug is already used by another product."
       }
     },
     "tokens": {

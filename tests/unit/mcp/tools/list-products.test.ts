@@ -36,6 +36,7 @@ function ctxBearer(
       scopes: { role, tools: ["list_products"] },
     },
     correlationId: "cid-1",
+    auditOverride: {},
   };
 }
 
@@ -43,6 +44,7 @@ const ctxAnon: McpRequestContext = {
   tenant,
   identity: { type: "anonymous" },
   correlationId: "cid-anon",
+  auditOverride: {},
 };
 
 describe("listProductsTool — isVisibleFor (hide from non-write roles)", () => {

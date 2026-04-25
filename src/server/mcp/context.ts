@@ -22,10 +22,24 @@ import { randomUUID } from "node:crypto";
 import { resolveTenant, type Tenant } from "@/server/tenant";
 import { resolveMcpIdentity, type McpIdentity } from "./identity";
 
+/**
+ * Mutable holder a tool handler can populate when its wire-return shape
+ * and its audit shape diverge — e.g. update_product returns the
+ * Tier-B-stripped wire shape but wants the full pre/post row recorded
+ * in the audit chain. dispatchTool reads these AFTER the handler
+ * returns. Tools that don't set them fall back to using the parsed
+ * wire output as both `result` and `after` (no `before`).
+ */
+export interface McpAuditOverride {
+  before?: unknown;
+  after?: unknown;
+}
+
 export interface McpRequestContext {
   tenant: Tenant;
   identity: McpIdentity;
   correlationId: string;
+  auditOverride: McpAuditOverride;
 }
 
 function hostFromRequest(req: Request): string | null {
@@ -57,5 +71,6 @@ export async function createMcpContext({
     tenant,
     identity,
     correlationId: randomUUID(),
+    auditOverride: {},
   };
 }

@@ -38,12 +38,14 @@ function ctxBearer(role: "owner" | "staff" | "support"): McpRequestContext {
       scopes: { role, tools: ["ping"] },
     },
     correlationId: "cid-1",
+    auditOverride: {},
   };
 }
 const ctxAnon: McpRequestContext = {
   tenant,
   identity: { type: "anonymous" },
   correlationId: "cid-anon",
+  auditOverride: {},
 };
 
 describe("pingTool", () => {
