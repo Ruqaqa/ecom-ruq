@@ -1,54 +1,89 @@
 /**
  * `update_product` — MCP mutation tool (chunk 1a.2).
  *
+ * MCP boundary speaks in SAR (riyals) — the AI surface should never
+ * see "halalas" or "minor units." This tool's input shape uses
+ * `costPriceSar` (decimal riyals); the handler converts to halalas
+ * before calling the service. Output also rewrites cost back to SAR.
+ * The service layer keeps storing halalas (exact integer math).
+ *
  * Mirrors `create_product`'s shape:
  *   - auditMode:"mutation" — runWithAudit opens withTenant + writes
  *     success row in-tx; failures land via writeAuditInOwnTx.
  *   - .strict() at the MCP seam so adversarial extra keys (`tenantId`,
- *     `role`, etc) reject — failedPaths captures the offending key.
+ *     `role`, `costPriceMinor`, etc) reject — failedPaths captures
+ *     the offending key.
  *   - Owner-first union output so Zod picks the Tier-B-superset shape
- *     before falling back to ProductPublic; the service already
- *     returns the role-gated wire shape.
+ *     before falling back to ProductPublic.
  *   - isVisibleFor + authorize gate to bearer + write role; tools/list
  *     never advertises this tool to support/customer.
- *
- * Tool description deliberately does NOT mention `slug`, `tenantId`,
- * or `role` — the schema is the source of truth, and operator-facing
- * descriptions stay free of internals an attacker could lean on.
  */
 import { z } from "zod";
 import type { McpTool } from "./registry";
 import { McpError } from "../errors";
-import {
-  ProductOwnerSchema,
-  ProductPublicSchema,
-  type ProductOwner,
-  type ProductPublic,
-} from "@/server/services/products/create-product";
+import { localizedTextPartial } from "@/lib/i18n/localized";
+import { SLUG_MAX, SLUG_REGEX, validateSlug } from "@/lib/product-slug";
 import {
   updateProduct,
-  UpdateProductInputSchema,
   type UpdateProductInput,
 } from "@/server/services/products/update-product";
 import { isWriteRole } from "@/server/tenant/context";
 import { StaleWriteError } from "@/server/audit/error-codes";
+import {
+  ProductOwnerMcpSchema,
+  ProductPublicMcpSchema,
+  productToMcpShape,
+  sarToHalalas,
+  type ProductOwnerMcp,
+  type ProductPublicMcp,
+} from "./_product-shapes";
 
-export const UpdateProductMcpInputSchema = (
-  UpdateProductInputSchema as unknown as z.ZodObject<z.ZodRawShape>
-).strict();
-// `UpdateProductInputSchema` is `z.object(...).refine(...)`; tightening to
-// strict requires reaching through the refine wrapper. The refined shape
-// (the editable-fields-required check) still applies because Zod evaluates
-// `.strict()` as a child operation on the underlying object.
-export type UpdateProductMcpInput = UpdateProductInput;
+const MCP_EDITABLE_KEYS = [
+  "slug",
+  "name",
+  "description",
+  "status",
+  "categoryId",
+  "costPriceSar",
+] as const;
 
-// Owner FIRST — ProductOwner is a superset, so a union with public first
-// would drop costPriceMinor from owner responses on the wire.
+export const UpdateProductMcpInputSchema = z
+  .object({
+    id: z.string().uuid(),
+    expectedUpdatedAt: z.string().datetime(),
+    slug: z
+      .string()
+      .min(1)
+      .max(SLUG_MAX)
+      .regex(SLUG_REGEX)
+      .refine((s) => validateSlug(s) === null, {
+        message: "slug: invalid shape (leading/trailing/consecutive hyphen)",
+      })
+      .optional(),
+    name: localizedTextPartial({ max: 256 }).optional(),
+    description: localizedTextPartial({ max: 4096 }).optional(),
+    status: z.enum(["draft", "active"]).optional(),
+    categoryId: z.string().uuid().nullable().optional(),
+    // Decimal riyals. `.nullable().optional()` keeps the
+    // "leave alone" / "clear" / "set" tri-state. Owner-only — the
+    // service rejects non-owner callers that include this key.
+    costPriceSar: z.number().nonnegative().nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (input) => MCP_EDITABLE_KEYS.some((k) => k in input),
+    { message: "at least one editable field required" },
+  );
+export type UpdateProductMcpInput = z.input<typeof UpdateProductMcpInputSchema>;
+
+// Owner FIRST — ProductOwnerMcpSchema is the superset (carries
+// costPriceSar). Public is the fallback for non-owner roles, which
+// drop the field entirely.
 export const UpdateProductMcpOutputSchema = z.union([
-  ProductOwnerSchema,
-  ProductPublicSchema,
+  ProductOwnerMcpSchema,
+  ProductPublicMcpSchema,
 ]);
-export type UpdateProductMcpOutput = ProductOwner | ProductPublic;
+export type UpdateProductMcpOutput = ProductOwnerMcp | ProductPublicMcp;
 
 export const updateProductTool: McpTool<
   UpdateProductMcpInput,
@@ -56,7 +91,7 @@ export const updateProductTool: McpTool<
 > = {
   name: "update_product",
   description:
-    "Update an existing product under the caller's tenant. Returns the role-gated product shape. Use list_products to find the product's id first. Requires owner or staff role.",
+    "Update an existing product under the caller's tenant. Cost prices are in SAR (riyals) — for example 850.50 means 850 riyals 50 halalas. Use list_products to find the product's id first. Requires owner or staff role.",
   inputSchema: UpdateProductMcpInputSchema as unknown as z.ZodType<UpdateProductMcpInput>,
   outputSchema: UpdateProductMcpOutputSchema,
   isVisibleFor(ctx) {
@@ -84,18 +119,36 @@ export const updateProductTool: McpTool<
     if (ctx.identity.type !== "bearer") {
       throw new McpError("unauthorized", "bearer token required");
     }
+    // Convert SAR → halalas at the boundary. `key in input` semantics
+    // preserved across the conversion: absent costPriceSar → absent
+    // costPriceMinor (leave alone); null → null (clear); number → halalas.
+    const serviceInput: UpdateProductInput = {
+      id: input.id,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+    };
+    if ("slug" in input) serviceInput.slug = input.slug;
+    if ("name" in input) serviceInput.name = input.name;
+    if ("description" in input) serviceInput.description = input.description;
+    if ("status" in input) serviceInput.status = input.status;
+    if ("categoryId" in input) serviceInput.categoryId = input.categoryId;
+    if ("costPriceSar" in input) {
+      serviceInput.costPriceMinor =
+        input.costPriceSar === null || input.costPriceSar === undefined
+          ? input.costPriceSar
+          : sarToHalalas(input.costPriceSar);
+    }
     try {
       const result = await updateProduct(
         tx,
         { id: ctx.tenant.id },
         ctx.identity.role,
-        input,
+        serviceInput,
       );
       // Record the full Tier-B before/after even when the wire return
       // is the role-gated subset — see McpAuditOverride.
       ctx.auditOverride.before = result.before;
       ctx.auditOverride.after = result.audit;
-      return result.public;
+      return productToMcpShape(result.public);
     } catch (err) {
       if (err instanceof StaleWriteError) {
         // dispatchTool's toMcpError() runs mapErrorToAuditCode (which

@@ -43,24 +43,28 @@ import { McpError } from "../errors";
 import {
   createProduct,
   CreateProductInputSchema,
-  ProductOwnerSchema,
-  ProductPublicSchema,
   type CreateProductInput,
-  type ProductOwner,
-  type ProductPublic,
 } from "@/server/services/products/create-product";
 import { isWriteRole } from "@/server/tenant/context";
+import {
+  ProductOwnerMcpSchema,
+  ProductPublicMcpSchema,
+  productToMcpShape,
+  type ProductOwnerMcp,
+  type ProductPublicMcp,
+} from "./_product-shapes";
 
 // `.strict()` at the MCP seam only — see module docstring.
 export const CreateProductMcpInputSchema = CreateProductInputSchema.strict();
 export type CreateProductMcpInput = CreateProductInput;
 
-// Owner FIRST — see module docstring. ProductOwnerSchema is a superset.
+// Owner FIRST — see module docstring. ProductOwnerMcpSchema is a superset.
+// MCP boundary speaks in SAR (riyals), not halalas — see _product-shapes.ts.
 export const CreateProductMcpOutputSchema = z.union([
-  ProductOwnerSchema,
-  ProductPublicSchema,
+  ProductOwnerMcpSchema,
+  ProductPublicMcpSchema,
 ]);
-export type CreateProductMcpOutput = ProductOwner | ProductPublic;
+export type CreateProductMcpOutput = ProductOwnerMcp | ProductPublicMcp;
 
 export const createProductTool: McpTool<
   CreateProductMcpInput,
@@ -68,7 +72,7 @@ export const createProductTool: McpTool<
 > = {
   name: "create_product",
   description:
-    "Create a product under the caller's tenant. Returns the role-gated product shape (owner/staff get costPriceMinor; support/customer see the public shape). Requires owner or staff role.",
+    "Create a product under the caller's tenant. Cost prices in the response are in SAR (riyals). Requires owner or staff role.",
   inputSchema: CreateProductMcpInputSchema,
   outputSchema: CreateProductMcpOutputSchema,
   isVisibleFor(ctx) {
@@ -103,11 +107,12 @@ export const createProductTool: McpTool<
       // threw). Kept for the same defense-in-depth reason as ping.
       throw new McpError("unauthorized", "bearer token required");
     }
-    return createProduct(
+    const result = await createProduct(
       tx,
       { id: ctx.tenant.id, defaultLocale: ctx.tenant.defaultLocale },
       ctx.identity.role,
       input,
     );
+    return productToMcpShape(result);
   },
 };

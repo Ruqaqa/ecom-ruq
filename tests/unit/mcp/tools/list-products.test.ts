@@ -135,7 +135,7 @@ describe("listProductsTool — output schema", () => {
           categoryId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
-          costPriceMinor: 1000,
+          costPriceSar: 10,
         },
       ],
       nextCursor: null,

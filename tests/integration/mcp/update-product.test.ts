@@ -260,12 +260,13 @@ describe("MCP update_product integration", () => {
   it("case 1 — owner PAT happy path: ProductOwner structuredContent + product row updated + audit row attributing owner PAT", async () => {
     fakeRedis.clear();
     const seeded = await seedProductRow(tenantId, { costPriceMinor: 100 });
+    // MCP boundary speaks SAR; service stores halalas. 9.99 SAR = 999 halalas.
     const body = callToolEnvelope("update_product", {
       id: seeded.id,
       expectedUpdatedAt: seeded.updatedAt.toISOString(),
       name: { en: `${CANARY_NAME} EN`, ar: `${CANARY_NAME} AR` },
       status: "active",
-      costPriceMinor: 999,
+      costPriceSar: 9.99,
     });
     const res = await POST(mcpRequest(body, patOwner));
     expect(res.status).toBe(200);
@@ -274,8 +275,8 @@ describe("MCP update_product integration", () => {
     const content = parsed.result?.structuredContent as Record<string, unknown> | undefined;
     expect(content).toBeTruthy();
     expect(content!.id).toBe(seeded.id);
-    expect(content).toHaveProperty("costPriceMinor");
-    expect(content!.costPriceMinor).toBe(999);
+    expect(content).toHaveProperty("costPriceSar");
+    expect(content!.costPriceSar).toBe(9.99);
 
     const dbRows = await sql<Array<{ status: string; cost_price_minor: number | null }>>`
       SELECT status, cost_price_minor FROM products WHERE id = ${seeded.id}

@@ -292,8 +292,9 @@ describe("MCP create_product integration", () => {
     const content = parsed.result?.structuredContent;
     expect(content).toBeTruthy();
     expect((content as Record<string, unknown>).slug).toBe(slug);
-    // Owner/staff see Tier-B `costPriceMinor` field (null unless supplied).
-    expect(content).toHaveProperty("costPriceMinor");
+    // MCP boundary speaks SAR — owner sees `costPriceSar` (null on create
+    // since the create input doesn't accept cost price).
+    expect(content).toHaveProperty("costPriceSar");
 
     // Product row inserted.
     const productRows = await readProducts(tenantId);
@@ -326,7 +327,7 @@ describe("MCP create_product integration", () => {
     expect(parsed.error).toBeUndefined();
     const content = parsed.result?.structuredContent;
     expect(content).toBeTruthy();
-    expect(content).toHaveProperty("costPriceMinor");
+    expect(content).toHaveProperty("costPriceSar");
     expect((content as Record<string, unknown>).slug).toBe(slug);
 
     // Audit row logs the staff PAT as the actor.

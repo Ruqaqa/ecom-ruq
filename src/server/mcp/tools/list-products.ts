@@ -6,17 +6,25 @@
  * (20) — AI callers tend to over-paginate and smaller pages keep
  * context budgets tight. `auditMode:"none"` means the dispatcher hands
  * us `tx = null`, so this handler opens its own non-audit tx.
+ *
+ * MCP boundary speaks in SAR (riyals) — owner callers see items with
+ * `costPriceSar`, never `costPriceMinor`. Non-owner roles (staff today)
+ * still get the public shape (no cost field at all). Service stays in
+ * halalas; conversion happens here per item.
  */
 import { z } from "zod";
 import type { McpTool } from "./registry";
 import { McpError } from "../errors";
-import {
-  listProducts,
-  ListProductsOutputOwnerSchema,
-  type ListProductsOutputOwner,
-} from "@/server/services/products/list-products";
+import { listProducts } from "@/server/services/products/list-products";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext, isWriteRole } from "@/server/tenant/context";
+import {
+  ProductOwnerMcpSchema,
+  ProductPublicMcpSchema,
+  productToMcpShape,
+  type ProductOwnerMcp,
+  type ProductPublicMcp,
+} from "./_product-shapes";
 
 export const ListProductsMcpInputSchema = z
   .object({
@@ -26,8 +34,25 @@ export const ListProductsMcpInputSchema = z
   .strict();
 export type ListProductsMcpInput = z.input<typeof ListProductsMcpInputSchema>;
 
-export const ListProductsMcpOutputSchema = ListProductsOutputOwnerSchema;
-export type ListProductsMcpOutput = ListProductsOutputOwner;
+const ListProductsOutputOwnerMcpSchema = z.object({
+  items: z.array(ProductOwnerMcpSchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+const ListProductsOutputPublicMcpSchema = z.object({
+  items: z.array(ProductPublicMcpSchema),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+
+// Owner FIRST so Zod picks the cost-bearing shape over the bare public.
+export const ListProductsMcpOutputSchema = z.union([
+  ListProductsOutputOwnerMcpSchema,
+  ListProductsOutputPublicMcpSchema,
+]);
+export type ListProductsMcpOutput =
+  | { items: ProductOwnerMcp[]; nextCursor: string | null; hasMore: boolean }
+  | { items: ProductPublicMcp[]; nextCursor: string | null; hasMore: boolean };
 
 export const listProductsTool: McpTool<
   ListProductsMcpInput,
@@ -35,7 +60,7 @@ export const listProductsTool: McpTool<
 > = {
   name: "list_products",
   description:
-    "List products in the current tenant, newest-updated first. Returns one page of results with an optional cursor for the next page. Requires owner or staff role.",
+    "List products in the current tenant, newest-updated first. Returns one page of results with an optional cursor for the next page. Cost prices in the response are in SAR (riyals). Requires owner or staff role.",
   inputSchema: ListProductsMcpInputSchema,
   outputSchema: ListProductsMcpOutputSchema,
   isVisibleFor(ctx) {
@@ -61,7 +86,6 @@ export const listProductsTool: McpTool<
     if (!appDb) {
       return { items: [], nextCursor: null, hasMore: false };
     }
-    // Hoist out of the async closure so TS narrowing is preserved.
     const { userId, tokenId, role } = ctx.identity;
     const tenantId = ctx.tenant.id;
     const authedCtx = buildAuthedTenantContext(
@@ -70,7 +94,12 @@ export const listProductsTool: McpTool<
     );
     return withTenant(appDb, authedCtx, async (tx) => {
       const out = await listProducts(tx, { id: tenantId }, role, input);
-      return ListProductsMcpOutputSchema.parse(out);
+      const items = out.items.map((p) => productToMcpShape(p));
+      return ListProductsMcpOutputSchema.parse({
+        items,
+        nextCursor: out.nextCursor,
+        hasMore: out.hasMore,
+      });
     });
   },
 };
