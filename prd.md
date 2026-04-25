@@ -80,7 +80,7 @@ The platform is the **source of truth** for products, inventory, and orders — 
 |---|---|---|
 | Model provider | **Anthropic Claude API** | First-class dependency; Haiku for cheap routing/classification, Sonnet for reasoning, Opus for complex agent tasks |
 | Server SDK | `@anthropic-ai/sdk` | Streaming, tool use, prompt caching |
-| Client streaming | Vercel AI SDK (`ai`) | Streaming UI for owner admin chat ("Chat with your store") with minimal boilerplate |
+| Client streaming | Vercel AI SDK (`ai`) | Streaming UI for the deferred customer storefront chatbot (see §4 "Deferred") with minimal boilerplate. Owner admin chat is handled outside the app via MCP clients (Claude Desktop / Claude Code), so no in-app streaming UI is built for it. |
 | MCP server | `@modelcontextprotocol/sdk` (TypeScript) | Exposes the platform's service layer to Claude Desktop / Claude Code / agents |
 | Agent orchestration | Plain Claude tool-use loops | No LangChain — too opaque for vibe coding; direct tool loops are clearer |
 
@@ -206,7 +206,7 @@ Every write operation (`createProduct`, `updateInventory`, `refundOrder`, `creat
 - A `run_sql_readonly` tool (sandboxed, row-limited, parameterized, no DDL) is available to owner-role tokens only, enabling ad-hoc natural-language analytics. Every query is logged.
 
 **Retrieval-augmented generation (RAG):**
-Deferred to post-launch (see §4 "Deferred"). Semantic search, `pgvector`, and the embeddings pipeline are not part of the core roadmap; they are revisited once revenue justifies the operational overhead. Owner-facing natural-language analytics (Phase 4 "Chat with your store") works without embeddings — it uses MCP tools and `run_sql_readonly` over structured data, not vector retrieval.
+Deferred to post-launch (see §4 "Deferred"). Semantic search, `pgvector`, and the embeddings pipeline are not part of the core roadmap; they are revisited once revenue justifies the operational overhead. Owner-facing natural-language analytics happens through MCP clients (Claude Desktop / Claude Code) talking to the platform's MCP server — no in-app admin chat UI is built. It works without embeddings: MCP tools plus `run_sql_readonly` over structured data, not vector retrieval.
 
 **Audit log:**
 - Every service write is logged with: actor type (user/agent/system), actor ID, token ID (if any), tenant, operation, input, before state, after state, outcome, timestamp, correlation ID.
@@ -521,7 +521,7 @@ This is the first time the project touches production hosting. It is delivered a
 
 ---
 
-### Phase 4 — Accounts, Inventory, Admin v2, "Chat with your store"
+### Phase 4 — Accounts, Inventory, Admin v2
 
 **Goal:** The business can run on the platform day-to-day, and the owner barely ever opens a dashboard.
 
@@ -538,19 +538,17 @@ This is the first time the project touches production hosting. It is delivered a
 - Returns & refund workflow (customer-initiated request → admin approval → refund)
 - Role-based admin: **fixed roles** (owner, staff, support) with predefined permission sets. A custom role + permission builder is Phase 7 (see §3.6) — every role gate in this phase must route through a single authorization contract per transport (tRPC: `requireRole`; MCP: `McpTool.authorize`) so the Phase 7 migration stays surgical.
 
-*"Chat with your store" interface*
-- Dedicated `/admin/chat` page: a Claude-powered chat bound to the MCP server via the current user's personal access token
-- Natural language queries for sales analysis, revenue, inventory, customer lookups, discount creation, order management
-- `run_sql_readonly` tool fully exposed (owner role only) for ad-hoc analytics: "show me average order value by category this quarter"
-- Streaming responses via Vercel AI SDK
-- Conversation history persisted per-user, searchable
+*Admin-via-MCP coverage*
+- The owner runs natural-language operations (sales analysis, revenue, inventory, customer lookups, discount creation, order management) through MCP clients (Claude Desktop / Claude Code) connected to the platform's MCP server using their personal access token. No in-app admin chat page is built.
+- `run_sql_readonly` tool fully exposed (owner role only) for ad-hoc analytics: "show me average order value by category this quarter".
+- Phase 4 work here is to make sure the MCP tool surface and personal-access-token UX are complete enough that this end-to-end workflow is comfortable from any MCP client.
 
 *New autonomous agents*
 - **Refund/fraud watcher:** flags unusual refund or chargeback patterns
 - **SEO drift watcher:** Core Web Vitals + Search Console checks weekly, alerts on drops
 - **Log triage:** daily Sentry summary with suggested root causes
 
-**Exit criteria:** The owner can run the store without opening the admin dashboard for routine tasks. Answers to "how is the business doing" arrive in chat in seconds. The agents catch the issues a human would otherwise miss. **Playwright coverage: signup → magic link (via Mailpit) → login → password reset (via Mailpit) → account profile → order history → reorder → discount code apply → return request → admin approval. `/admin/chat` page sends a message and receives a streamed response. All in both locales on mobile viewport.**
+**Exit criteria:** The owner can run the store without opening the admin dashboard for routine tasks. From an MCP client (Claude Desktop / Claude Code) connected to the platform's MCP server, answers to "how is the business doing" arrive in seconds. The agents catch the issues a human would otherwise miss. **Playwright coverage: signup → magic link (via Mailpit) → login → password reset (via Mailpit) → account profile → order history → reorder → discount code apply → return request → admin approval. All in both locales on mobile viewport. (The MCP-based admin workflow is exercised by MCP-mutation coverage and integration tests, not Playwright, since there is no in-app chat page to drive.)**
 
 ---
 
@@ -685,7 +683,7 @@ The following capabilities were scoped out of the phased roadmap as nice-to-have
 
 **When revisiting:** the first decision is whether to ship the bot on Meilisearch-backed retrieval (faster to land, weaker multilingual semantics) or to add pgvector + Voyage first for better Arabic/English semantic retrieval. Either path is roughly a phase of work. The design rules in §6.4, §9.2, and §9.4 that reference the customer bot apply when this work is revived; they are documented now so the principles persist.
 
-**What is *not* deferred** and stays in the core roadmap: the owner admin chat ("Chat with your store", Phase 4), the MCP server and all operator tools, AI-assisted bilingual product entry (Phase 1a), AI-generated abandoned cart emails and blog drafting (Phase 7), and all autonomous ops agents (Phase 2 onward). Those use Claude text generation and MCP tool-use, not embeddings.
+**What is *not* deferred** and stays in the core roadmap: the MCP server and all operator tools (the owner runs admin workflows through MCP clients like Claude Desktop / Claude Code — no in-app admin chat page is built), AI-assisted bilingual product entry (Phase 1a), AI-generated abandoned cart emails and blog drafting (Phase 7), and all autonomous ops agents (Phase 2 onward). Those use Claude text generation and MCP tool-use, not embeddings.
 
 ---
 
