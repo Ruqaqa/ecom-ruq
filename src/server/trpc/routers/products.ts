@@ -34,7 +34,7 @@
  * callers (`identity: 'any'` — the default) because mobile/MCP clients
  * need to create products. `tokens.*` is the opposite: session-only.
  */
-import { router, TRPCError } from "../init";
+import { router, publicProcedure, TRPCError } from "../init";
 import { mutationProcedure } from "../middleware/audit-wrap";
 import { requireRole } from "../middleware/require-role";
 import { deriveRole } from "../ctx-role";
@@ -42,8 +42,44 @@ import {
   createProduct,
   CreateProductInputSchema,
 } from "@/server/services/products/create-product";
+import {
+  listProducts,
+  ListProductsInputSchema,
+} from "@/server/services/products/list-products";
+import { appDb, withTenant } from "@/server/db";
+import { buildAuthedTenantContext } from "@/server/tenant/context";
 
 export const productsRouter = router({
+  // Read path — no audit wrap (reads bypass audit per prd §3.7). Role
+  // comes from `deriveRole(ctx)`; `scripts/check-role-invariants.ts`
+  // enforces every router reads role exclusively through it.
+  list: publicProcedure
+    .use(requireRole({ roles: ["owner", "staff"], identity: "any" }))
+    .input(ListProductsInputSchema)
+    .query(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      if (!appDb) {
+        return { items: [], nextCursor: null, hasMore: false };
+      }
+      // requireRole narrows ctx.identity away from anonymous.
+      const { userId } = ctx.identity;
+      const tokenId =
+        ctx.identity.type === "bearer" ? ctx.identity.tokenId : null;
+      const authedCtx = buildAuthedTenantContext(
+        { id: ctx.tenant.id },
+        { userId, actorType: "user", tokenId, role },
+      );
+      return withTenant(appDb, authedCtx, (tx) =>
+        listProducts(tx, { id: ctx.tenant.id }, role, input),
+      );
+    }),
+
   create: mutationProcedure
     .use(requireRole({ roles: ["owner", "staff"] }))
     .input(CreateProductInputSchema)

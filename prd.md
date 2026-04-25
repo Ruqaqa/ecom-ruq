@@ -383,13 +383,20 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 
 **Goal:** The owner can create and manage fully bilingual products end-to-end — via the admin UI and via Claude. The public storefront does not exist yet; this phase exists to prove the bilingual content pipeline before any public traffic sees it.
 
+**Already landed in Phase 0 (chunks 6 & 7):** `createProduct` service + tRPC + MCP (`create_product`) wired end-to-end through the adapter audit middleware, and the `/{locale}/admin/products/new` admin create form gated by `requireMembership(['owner','staff'])` with the RSC guard at `src/app/[locale]/admin/layout.tsx`. Phase 1a picks up from there — the remaining CRUD, the bilingual content model, the image pipeline, the catalog MCP surface, and the AI assist panel.
+
+**Chunking:** Phase 1a is broken into small chunks; each chunk is scoped so an agent team can land it in a single session (service + transport + admin UI + Playwright in both locales on mobile + vitest + coverage lint). Chunk-level progress lives in `CLAUDE.md`. The sequence below is the intended landing order.
+
 **Work:**
 
 *Catalog (admin-side)*
-- Service layer + tRPC procedures: `createProduct`, `updateProduct`, `deleteProduct`, `listProducts`, `getProduct`, `uploadImage`, `createCategory`, `updateVariant`, etc.
-- Admin CRUD UI for categories, products, variants, options, images — thin tRPC consumer
-- Bilingual content model wired throughout admin: every translatable field (name, description, SEO title/meta) is a JSONB `{ en, ar }` input pair; missing-translation badge surfaced per field
-- Image pipeline: upload → BunnyCDN → responsive `next/image`
+- **1a.1 — Admin product list.** `/{locale}/admin/products` table view with `listProducts` service + tRPC query + read-only `list_products` MCP tool. Columns: name (in current locale), slug, status, last-updated. Pagination (20/page). Empty state with a link to the existing create form. No edit/delete/filter yet. Owner-or-staff gated via the existing RSC guard.
+- **1a.2 — Edit a product.** `updateProduct` service + tRPC mutation + `update_product` MCP tool + admin edit form reached from the list row. Bilingual field pair polished during this chunk.
+- **1a.3 — Soft-delete a product.** `deleteProduct` service + tRPC mutation + `delete_product` MCP tool (`confirm: true` required) + admin delete action with a recovery window. Hard-delete is a separate gated operation, out of scope here.
+- **1a.4 — Category management.** `createCategory` / `listCategories` / `updateCategory` services + tRPC + MCP (`list_categories`, `create_category`) + admin UI for list/create/edit. Products gain a category selector.
+- **1a.5 — Variant & option CRUD.** `updateVariant` + supporting services + tRPC + MCP + admin UI.
+- **1a.6 — Bilingual content model end-to-end.** Every translatable field (name, description, SEO title/meta) as a JSONB `{ en, ar }` input pair; missing-translation badge surfaced per field. Applies across products, variants, categories.
+- **1a.7 — Image pipeline.** `uploadImage` service + admin upload UI + responsive `next/image`. Local filesystem first; the BunnyCDN swap lands inside the Launch infrastructure block at the top of Phase 1b.
 
 *AI-assisted bilingual entry*
 - Admin product form has an "AI assist" panel:
@@ -399,8 +406,8 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - Arabic output is system-prompted to read natively (not machine-translated feel); the held-out Arabic evaluation set is begun in this phase and refined in Phase 3
 - All AI assists are editable; nothing is auto-published without owner confirmation
 
-*MCP surface for catalog*
-- MCP tools live: `create_product`, `update_product`, `delete_product`, `search_products`, `get_product`, `list_categories`, `create_category`
+*MCP surface for catalog (cumulative with the per-chunk tools above)*
+- MCP tools live: `create_product` (done in Phase 0 chunk 7), `list_products`, `update_product`, `delete_product`, `search_products`, `get_product`, `list_categories`, `create_category`, `update_category`
 - Tools accept and return bilingual fields; owner can drive product entry from Claude Desktop in either language
 
 **Exit criteria:** The owner can add a fully bilingual product (`ar` + `en` content, images with alt text in both languages) via the admin UI **or** via Claude Desktop, and verify it via tRPC and MCP tool calls. No public storefront yet. **Playwright coverage: admin product CRUD with bilingual content entry; AI assist panel happy path in both directions (`ar`→`en` and `en`→`ar`); missing-translation badge displays correctly. All on mobile viewport. Local checks (lint, typecheck, vitest, Playwright, coverage lint) green — hosted CI enforcement does not exist yet; it lands in the Launch infrastructure block at the top of Phase 1b.**

@@ -49,6 +49,7 @@ import {
   type ProductOwner,
   type ProductPublic,
 } from "@/server/services/products/create-product";
+import { isWriteRole } from "@/server/tenant/context";
 
 // `.strict()` at the MCP seam only — see module docstring.
 export const CreateProductMcpInputSchema = CreateProductInputSchema.strict();
@@ -60,10 +61,6 @@ export const CreateProductMcpOutputSchema = z.union([
   ProductPublicSchema,
 ]);
 export type CreateProductMcpOutput = ProductOwner | ProductPublic;
-
-function isWriteRole(role: string): boolean {
-  return role === "owner" || role === "staff";
-}
 
 export const createProductTool: McpTool<
   CreateProductMcpInput,

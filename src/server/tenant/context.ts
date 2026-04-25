@@ -67,3 +67,7 @@ export function buildAuthedTenantContext(
     role: session.role,
   } as AuthedTenantContext;
 }
+
+export function isWriteRole(role: Role): boolean {
+  return role === "owner" || role === "staff";
+}

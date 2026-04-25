@@ -40,6 +40,7 @@ import type { Tx } from "@/server/db";
 import { dispatchTool, type ToolAuditConfig } from "../audit-adapter";
 import { pingTool } from "./ping";
 import { createProductTool } from "./create-product";
+import { listProductsTool } from "./list-products";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
 export interface McpTool<TInput, TOutput> {
@@ -74,6 +75,12 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   {
     tool: createProductTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
+  },
+  // 1a.1 — `list_products` read tool. auditMode:"none"; Decision-1
+  // widening still audits forbidden refusals.
+  {
+    tool: listProductsTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "none" },
   },
   // 7.4 — `run_sql_readonly` registered but locked off. It's a read
   // (reads don't audit per prd §3.7) so `auditMode:"none"`. Its

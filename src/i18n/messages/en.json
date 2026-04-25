@@ -71,7 +71,30 @@
       },
       "list": {
         "title": "Products",
-        "createdMessage": "Created: {id}"
+        "createdMessage": "Created: {id}",
+        "createCta": "Create product",
+        "empty": {
+          "heading": "No products yet",
+          "body": "Your first product is one click away.",
+          "cta": "Create your first product"
+        },
+        "status": {
+          "draft": "Draft",
+          "active": "Active"
+        },
+        "columns": {
+          "name": "Name",
+          "status": "Status",
+          "slug": "Slug",
+          "updated": "Last updated"
+        },
+        "noName": "(no name)",
+        "translationMissing": "Translation missing",
+        "pagination": {
+          "next": "Next",
+          "backToFirst": "Back to first page"
+        },
+        "error": "Could not load products. Try again in a moment."
       }
     },
     "tokens": {

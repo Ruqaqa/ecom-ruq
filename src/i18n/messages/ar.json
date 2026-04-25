@@ -71,7 +71,30 @@
       },
       "list": {
         "title": "المنتجات",
-        "createdMessage": "تم الإنشاء: {id}"
+        "createdMessage": "تم الإنشاء: {id}",
+        "createCta": "إنشاء منتج",
+        "empty": {
+          "heading": "لا توجد منتجات بعد",
+          "body": "أول منتج لك على بُعد نقرة واحدة.",
+          "cta": "أنشئ أول منتج"
+        },
+        "status": {
+          "draft": "مسودة",
+          "active": "مفعّل"
+        },
+        "columns": {
+          "name": "الاسم",
+          "status": "الحالة",
+          "slug": "المعرف",
+          "updated": "آخر تحديث"
+        },
+        "noName": "(بدون اسم)",
+        "translationMissing": "ترجمة ناقصة",
+        "pagination": {
+          "next": "التالي",
+          "backToFirst": "العودة للصفحة الأولى"
+        },
+        "error": "تعذّر تحميل المنتجات. حاول بعد لحظة."
       }
     },
     "tokens": {
