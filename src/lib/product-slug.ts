@@ -14,6 +14,8 @@
  * Server Zod is authoritative. This module is defense-in-depth + UX.
  */
 
+import { z } from "zod";
+
 export const SLUG_REGEX = /^[a-z0-9-]+$/;
 export const SLUG_MAX = 120;
 
@@ -63,3 +65,18 @@ export function validateSlug(raw: string): SlugValidationError | null {
   if (raw.includes("--")) return "consecutive_hyphens";
   return null;
 }
+
+/**
+ * Single Zod schema for slug input. Used by every service / MCP tool
+ * that accepts a slug (create, update, future variants/categories).
+ * Drift would let one transport accept a slug shape another transport
+ * would reject — keep this the single source of truth.
+ */
+export const slugSchema = z
+  .string()
+  .min(1)
+  .max(SLUG_MAX)
+  .regex(SLUG_REGEX)
+  .refine((s) => validateSlug(s) === null, {
+    message: "slug: invalid shape (leading/trailing/consecutive hyphen)",
+  });

@@ -26,6 +26,7 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { SlugTakenError } from "@/server/audit/error-codes";
 import * as schema from "@/server/db/schema";
 import { products } from "@/server/db/schema/catalog";
 import { withTenant } from "@/server/db";
@@ -270,7 +271,7 @@ describe("updateProduct — service", () => {
     expect(e1.message).toBe(e2.message);
   });
 
-  it("8. slug-collision: editing slug to one another product owns surfaces TRPCError CONFLICT 'slug_taken' (no slug echo)", async () => {
+  it("8. slug-collision: editing slug to one another product owns surfaces SlugTakenError (no slug echo)", async () => {
     const { updateProduct } = await import("@/server/services/products/update-product");
     const tenantId = await makeTenant();
     const a = await seedProduct(tenantId);
@@ -288,11 +289,10 @@ describe("updateProduct — service", () => {
     } catch (e) {
       caught = e;
     }
-    expect(caught).toBeInstanceOf(TRPCError);
-    expect((caught as TRPCError).code).toBe("CONFLICT");
-    expect((caught as TRPCError).message).toBe("slug_taken");
+    expect(caught).toBeInstanceOf(SlugTakenError);
+    expect((caught as Error).message).toBe("slug_taken");
     // Wire message must NOT echo the offending slug back.
-    expect((caught as TRPCError).message).not.toContain(a.slug);
+    expect((caught as Error).message).not.toContain(a.slug);
   });
 
   it("9. slug unchanged from current value succeeds (no spurious self-collision)", async () => {

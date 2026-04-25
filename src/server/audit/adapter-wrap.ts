@@ -26,22 +26,12 @@
  * avoiding the duplicated-switch drift risk.
  */
 import { TRPCError } from "@trpc/server";
-import { StaleWriteError, type AuditErrorCode } from "./error-codes";
-
-/**
- * 3-level `.cause` peel to find a pg SQLSTATE buried under TRPCError / a
- * Drizzle wrapper. Same semantics as the tRPC audit-wrap's extractor.
- */
-function extractPgCode(x: unknown): string | undefined {
-  const SQLSTATE = /^[A-Z0-9]{5}$/;
-  let cur: unknown = x;
-  for (let depth = 0; depth < 4 && cur != null; depth++) {
-    const code = (cur as { code?: unknown }).code;
-    if (typeof code === "string" && SQLSTATE.test(code)) return code;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
+import { findPgErrorRecord } from "@/server/db/pg-errors";
+import {
+  SlugTakenError,
+  StaleWriteError,
+  type AuditErrorCode,
+} from "./error-codes";
 
 /**
  * Closed-set error → AuditErrorCode. Mirrors the tRPC audit-wrap's
@@ -63,13 +53,17 @@ function extractPgCode(x: unknown): string | undefined {
  * No fallthrough to err.message — see prd.md §3.7.
  */
 export function mapErrorToAuditCode(err: unknown): AuditErrorCode {
-  // StaleWriteError can either bubble directly (MCP) or sit in a
-  // TRPCError's `.cause` (tRPC procedures translate to a CONFLICT wire
-  // shape so clients get a usable status code; the cause-peel below
-  // recovers the typed signal for the audit mapper).
+  // Domain errors can either bubble directly (MCP) or sit in a
+  // TRPCError's `.cause` (tRPC procedures translate to a wire-shaped
+  // status code; the cause-peel below recovers the typed signal for
+  // the audit mapper).
   if (err instanceof StaleWriteError) return "stale_write";
   if (err instanceof TRPCError && err.cause instanceof StaleWriteError) {
     return "stale_write";
+  }
+  if (err instanceof SlugTakenError) return "conflict";
+  if (err instanceof TRPCError && err.cause instanceof SlugTakenError) {
+    return "conflict";
   }
   if (err instanceof TRPCError) {
     switch (err.code) {
@@ -97,7 +91,7 @@ export function mapErrorToAuditCode(err: unknown): AuditErrorCode {
   ) {
     return "validation_failed";
   }
-  const pgCode = extractPgCode(err);
+  const pgCode = findPgErrorRecord(err)?.code;
   if (pgCode === "23505" || pgCode === "23503") return "conflict";
   if (pgCode === "42501") return "rls_denied";
   if (pgCode === "40001") return "serialization_failure";

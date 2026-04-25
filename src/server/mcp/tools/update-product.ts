@@ -22,13 +22,12 @@ import { z } from "zod";
 import type { McpTool } from "./registry";
 import { McpError } from "../errors";
 import { localizedTextPartial } from "@/lib/i18n/localized";
-import { SLUG_MAX, SLUG_REGEX, validateSlug } from "@/lib/product-slug";
+import { slugSchema } from "@/lib/product-slug";
 import {
   updateProduct,
   type UpdateProductInput,
 } from "@/server/services/products/update-product";
 import { isWriteRole } from "@/server/tenant/context";
-import { StaleWriteError } from "@/server/audit/error-codes";
 import {
   ProductOwnerMcpSchema,
   ProductPublicMcpSchema,
@@ -51,15 +50,7 @@ export const UpdateProductMcpInputSchema = z
   .object({
     id: z.string().uuid(),
     expectedUpdatedAt: z.string().datetime(),
-    slug: z
-      .string()
-      .min(1)
-      .max(SLUG_MAX)
-      .regex(SLUG_REGEX)
-      .refine((s) => validateSlug(s) === null, {
-        message: "slug: invalid shape (leading/trailing/consecutive hyphen)",
-      })
-      .optional(),
+    slug: slugSchema.optional(),
     name: localizedTextPartial({ max: 256 }).optional(),
     description: localizedTextPartial({ max: 4096 }).optional(),
     status: z.enum(["draft", "active"]).optional(),
@@ -137,26 +128,16 @@ export const updateProductTool: McpTool<
           ? input.costPriceSar
           : sarToHalalas(input.costPriceSar);
     }
-    try {
-      const result = await updateProduct(
-        tx,
-        { id: ctx.tenant.id },
-        ctx.identity.role,
-        serviceInput,
-      );
-      // Record the full Tier-B before/after even when the wire return
-      // is the role-gated subset — see McpAuditOverride.
-      ctx.auditOverride.before = result.before;
-      ctx.auditOverride.after = result.audit;
-      return productToMcpShape(result.public);
-    } catch (err) {
-      if (err instanceof StaleWriteError) {
-        // dispatchTool's toMcpError() runs mapErrorToAuditCode (which
-        // recognizes StaleWriteError directly) → kind 'stale_write' →
-        // JSON-RPC -32009. Re-throw bare; the dispatcher classifies.
-        throw err;
-      }
-      throw err;
-    }
+    // Domain errors (SlugTakenError, StaleWriteError) bubble bare —
+    // dispatchTool's toMcpError + mapErrorToAuditCode classify them.
+    const result = await updateProduct(
+      tx,
+      { id: ctx.tenant.id },
+      ctx.identity.role,
+      serviceInput,
+    );
+    ctx.auditOverride.before = result.before;
+    ctx.auditOverride.after = result.audit;
+    return productToMcpShape(result.public);
   },
 };

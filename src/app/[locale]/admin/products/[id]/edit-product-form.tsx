@@ -59,17 +59,16 @@ export function EditProductForm({ locale, initial }: Props) {
   // role-gated DTO exposed it (RSC page passes it through). For staff
   // the prop is undefined and we never render the field.
   const initialHasCostPrice = "costPriceMinor" in initial;
-  const [costPriceText, setCostPriceText] = useState<string>(
+  const initialCostPriceText =
     initialHasCostPrice && initial.costPriceMinor != null
       ? (initial.costPriceMinor / 100).toFixed(2)
-      : "",
-  );
+      : "";
+  const [costPriceText, setCostPriceText] = useState<string>(initialCostPriceText);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [topError, setTopError] = useState<string | null>(null);
   const [staleWriteFlash, setStaleWriteFlash] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
-  // Dirty state — deep equality vs the initial values.
   const dirty = useMemo<boolean>(() => {
     if (slug !== initial.slug) return true;
     if (nameEn !== initial.nameEn) return true;
@@ -77,13 +76,7 @@ export function EditProductForm({ locale, initial }: Props) {
     if (descriptionEn !== initial.descriptionEn) return true;
     if (descriptionAr !== initial.descriptionAr) return true;
     if (status !== initial.status) return true;
-    if (initialHasCostPrice) {
-      const initialText =
-        initial.costPriceMinor != null
-          ? (initial.costPriceMinor / 100).toFixed(2)
-          : "";
-      if (costPriceText !== initialText) return true;
-    }
+    if (initialHasCostPrice && costPriceText !== initialCostPriceText) return true;
     return false;
   }, [
     slug,
@@ -95,6 +88,7 @@ export function EditProductForm({ locale, initial }: Props) {
     costPriceText,
     initial,
     initialHasCostPrice,
+    initialCostPriceText,
   ]);
 
   // Browser back / tab close confirmation.
@@ -184,20 +178,14 @@ export function EditProductForm({ locale, initial }: Props) {
       }
     }
     if (status !== initial.status) payload.status = status;
-    if (initialHasCostPrice) {
-      const initialText =
-        initial.costPriceMinor != null
-          ? (initial.costPriceMinor / 100).toFixed(2)
-          : "";
-      if (costPriceText !== initialText) {
-        if (costPriceText.length === 0) {
-          payload.costPriceMinor = null;
-        } else {
-          const sar = Number.parseFloat(costPriceText);
-          payload.costPriceMinor = Number.isFinite(sar)
-            ? Math.round(sar * 100)
-            : null;
-        }
+    if (initialHasCostPrice && costPriceText !== initialCostPriceText) {
+      if (costPriceText.length === 0) {
+        payload.costPriceMinor = null;
+      } else {
+        const sar = Number.parseFloat(costPriceText);
+        payload.costPriceMinor = Number.isFinite(sar)
+          ? Math.round(sar * 100)
+          : null;
       }
     }
     return payload as Parameters<typeof mutation.mutate>[0];

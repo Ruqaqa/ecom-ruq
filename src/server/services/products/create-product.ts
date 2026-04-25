@@ -24,18 +24,15 @@
  *      it). `.parse` throws on drift, which we prefer to a silent leak.
  */
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { products } from "@/server/db/schema/catalog";
 import { localizedText, localizedTextPartial } from "@/lib/i18n/localized";
+import { SlugTakenError } from "@/server/audit/error-codes";
 import { extractPgUniqueViolation } from "./pg-error-helpers";
-// Latin-only URL slug. Regex + length + leading/trailing/consecutive-
-// hyphen invariants all live in the shared `@/lib/product-slug`
-// module — same module the admin form imports for live validation.
-// Single source of truth; client and server cannot drift. Per-tenant
-// uniqueness is enforced by pg index `products_tenant_slug_unique`;
-// collisions map to errorCode: 'conflict' via block-2
-// mapErrorToAuditCode.
-import { SLUG_REGEX, SLUG_MAX, validateSlug } from "@/lib/product-slug";
+// Slug shape (regex, length, leading/trailing/consecutive-hyphen) lives
+// in `@/lib/product-slug` — same module the admin form imports for live
+// validation. Per-tenant uniqueness is enforced by pg index
+// `products_tenant_slug_unique`; collisions throw `SlugTakenError`.
+import { slugSchema } from "@/lib/product-slug";
 import type { Tx } from "@/server/db";
 import type { Role } from "@/server/tenant/context";
 
@@ -45,14 +42,7 @@ export interface CreateProductTenantInfo {
 }
 
 export const CreateProductInputSchema = z.object({
-  slug: z
-    .string()
-    .min(1)
-    .max(SLUG_MAX)
-    .regex(SLUG_REGEX)
-    .refine((s) => validateSlug(s) === null, {
-      message: "slug: invalid shape (leading/trailing/consecutive hyphen)",
-    }),
+  slug: slugSchema,
   name: localizedText({ max: 256 }),
   description: localizedTextPartial({ max: 4096 }).nullish(),
   status: z.enum(["draft", "active"]).default("draft"),
@@ -115,16 +105,11 @@ export async function createProduct(
       })
       .returning();
   } catch (err) {
-    // Slug collision → typed CONFLICT 'slug_taken' (closed-set wire
-    // message; never echoes the offending slug back). Audit-wrap's
-    // mapErrorToAuditCode still classifies pg 23505 → 'conflict'
-    // because the cause is preserved. Other DB errors bubble.
+    // Slug collision → SlugTakenError (closed-set wire message; never
+    // echoes the offending slug). Transport adapters translate to their
+    // wire shape; the audit mapper recognizes the class.
     if (extractPgUniqueViolation(err, "products_tenant_slug_unique")) {
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: "slug_taken",
-        cause: err,
-      });
+      throw new SlugTakenError(err);
     }
     throw err;
   }

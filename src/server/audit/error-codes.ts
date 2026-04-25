@@ -36,3 +36,20 @@ export class StaleWriteError extends Error {
     this.name = "StaleWriteError";
   }
 }
+
+/**
+ * Thrown by services when a slug uniqueness violation surfaces from
+ * pg 23505 on `products_tenant_slug_unique`. Mirrors `StaleWriteError`
+ * shape: domain-typed, no PII, audit-mapper recognizes via instanceof
+ * (and via TRPCError `.cause` after transport translation) → audit
+ * code 'conflict'. Wire message stays the closed-set string
+ * 'slug_taken'; the offending slug value is NEVER interpolated.
+ */
+export class SlugTakenError extends Error {
+  public readonly slugTaken = true as const;
+  constructor(cause?: unknown) {
+    super("slug_taken");
+    this.name = "SlugTakenError";
+    if (cause !== undefined) (this as Error & { cause?: unknown }).cause = cause;
+  }
+}

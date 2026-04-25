@@ -54,7 +54,7 @@ import {
 import { getProduct } from "@/server/services/products/get-product";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
-import { StaleWriteError } from "@/server/audit/error-codes";
+import { SlugTakenError, StaleWriteError } from "@/server/audit/error-codes";
 
 export const productsRouter = router({
   // Read path — no audit wrap (reads bypass audit per prd §3.7). Role
@@ -139,14 +139,20 @@ export const productsRouter = router({
         ctx.auditPayloads.after = result.audit;
         return result.public;
       } catch (err) {
+        // Translate domain errors to wire-shaped CONFLICTs; the audit
+        // mapper recognizes both via TRPCError `.cause` so the closed-
+        // set audit code stays accurate ('stale_write' vs 'conflict').
         if (err instanceof StaleWriteError) {
-          // Translate to CONFLICT for the wire (clients can recognize
-          // a usable status code); cause preserved so audit-wrap's
-          // mapErrorToAuditCode classifies as 'stale_write' rather
-          // than the generic 'internal_error' / 'conflict' branches.
           throw new TRPCError({
             code: "CONFLICT",
             message: "stale_write",
+            cause: err,
+          });
+        }
+        if (err instanceof SlugTakenError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "slug_taken",
             cause: err,
           });
         }
@@ -176,11 +182,22 @@ export const productsRouter = router({
           message: "role derivation failed — Tier-B gate integrity violated",
         });
       }
-      return createProduct(
-        ctx.tx,
-        { id: ctx.tenant.id, defaultLocale: ctx.tenant.defaultLocale },
-        role,
-        input,
-      );
+      try {
+        return await createProduct(
+          ctx.tx,
+          { id: ctx.tenant.id, defaultLocale: ctx.tenant.defaultLocale },
+          role,
+          input,
+        );
+      } catch (err) {
+        if (err instanceof SlugTakenError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "slug_taken",
+            cause: err,
+          });
+        }
+        throw err;
+      }
     }),
 });

@@ -32,7 +32,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { products } from "@/server/db/schema/catalog";
 import { localizedTextPartial } from "@/lib/i18n/localized";
-import { SLUG_REGEX, SLUG_MAX, validateSlug } from "@/lib/product-slug";
+import { slugSchema } from "@/lib/product-slug";
 import {
   ProductOwnerSchema,
   ProductPublicSchema,
@@ -42,7 +42,7 @@ import {
 import { extractPgUniqueViolation } from "./pg-error-helpers";
 import type { Tx } from "@/server/db";
 import { isWriteRole, type Role } from "@/server/tenant/context";
-import { StaleWriteError } from "@/server/audit/error-codes";
+import { SlugTakenError, StaleWriteError } from "@/server/audit/error-codes";
 
 export interface UpdateProductTenantInfo {
   id: string;
@@ -61,15 +61,7 @@ export const UpdateProductInputSchema = z
   .object({
     id: z.string().uuid(),
     expectedUpdatedAt: z.string().datetime(),
-    slug: z
-      .string()
-      .min(1)
-      .max(SLUG_MAX)
-      .regex(SLUG_REGEX)
-      .refine((s) => validateSlug(s) === null, {
-        message: "slug: invalid shape (leading/trailing/consecutive hyphen)",
-      })
-      .optional(),
+    slug: slugSchema.optional(),
     name: localizedTextPartial({ max: 256 }).optional(),
     description: localizedTextPartial({ max: 4096 }).optional(),
     status: z.enum(["draft", "active"]).optional(),
@@ -211,11 +203,7 @@ export async function updateProduct(
       .returning();
   } catch (err) {
     if (extractPgUniqueViolation(err, "products_tenant_slug_unique")) {
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: "slug_taken",
-        cause: err,
-      });
+      throw new SlugTakenError(err);
     }
     throw err;
   }

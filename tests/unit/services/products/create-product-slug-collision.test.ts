@@ -1,25 +1,23 @@
 /**
- * Carry-over fix from chunk 1a.2: createProduct must surface a typed
- * CONFLICT 'slug_taken' instead of letting the pg 23505 DatabaseError
- * bubble out as a 500. The mapErrorToAuditCode layer already maps pg
- * 23505 to the audit closed-set 'conflict', but the wire-level
- * TRPCError code was previously INTERNAL_SERVER_ERROR — clients had
- * to grep err.message to detect the duplicate.
+ * createProduct surfaces a domain `SlugTakenError` on pg 23505 instead
+ * of letting the DatabaseError bubble as a generic 500. Transport
+ * adapters translate to their wire shape (tRPC: CONFLICT 'slug_taken';
+ * MCP: 'conflict' kind via the audit mapper).
  *
  * Asserts:
- *   - the error is a TRPCError with code === 'CONFLICT'
- *   - message is exactly 'slug_taken' (closed-set, not interpolated;
- *     never echoes the offending slug back to the wire)
+ *   - the service throws a SlugTakenError (not TRPCError; per CLAUDE.md
+ *     §2 service code stays transport-neutral).
+ *   - the error message is exactly 'slug_taken' — no slug echo.
  */
 import { describe, it, expect, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import * as schema from "@/server/db/schema";
 import { withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
+import { SlugTakenError } from "@/server/audit/error-codes";
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:55432/ecom_ruq_dev";
@@ -49,7 +47,7 @@ function ctxFor(tenantId: string) {
 }
 
 describe("createProduct — slug collision", () => {
-  it("a duplicate slug surfaces TRPCError CONFLICT 'slug_taken' (not a 500)", async () => {
+  it("a duplicate slug surfaces SlugTakenError (not a 500, no slug echo)", async () => {
     const { createProduct } = await import("@/server/services/products/create-product");
     const tenantId = await makeTenant();
     const slug = `dup-${randomUUID().slice(0, 8)}`;
@@ -60,8 +58,7 @@ describe("createProduct — slug collision", () => {
       createProduct(tx, { id: tenantId, defaultLocale: "en" }, "owner", input),
     );
 
-    // Second insert: same slug, same tenant → pg 23505 →
-    // TRPCError CONFLICT 'slug_taken'.
+    // Second insert: same slug, same tenant → pg 23505 → SlugTakenError.
     let caught: unknown = null;
     try {
       await withTenant(superDb, ctxFor(tenantId), async (tx) =>
@@ -70,12 +67,10 @@ describe("createProduct — slug collision", () => {
     } catch (e) {
       caught = e;
     }
-    expect(caught).toBeInstanceOf(TRPCError);
-    expect((caught as TRPCError).code).toBe("CONFLICT");
-    expect((caught as TRPCError).message).toBe("slug_taken");
+    expect(caught).toBeInstanceOf(SlugTakenError);
+    expect((caught as Error).message).toBe("slug_taken");
 
-    // The wire message must NOT echo the slug value back (no
-    // operator-supplied data crosses the surface).
-    expect((caught as TRPCError).message).not.toContain(slug);
+    // The wire message must NOT echo the slug value back.
+    expect((caught as Error).message).not.toContain(slug);
   });
 });
