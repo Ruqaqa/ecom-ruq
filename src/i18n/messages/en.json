@@ -101,7 +101,7 @@
         "title": "Edit product",
         "submit": "Save changes",
         "cancel": "Cancel",
-        "costPriceLabel": "Cost price (minor units)",
+        "costPriceLabel": "Cost price (SAR)",
         "costPriceHelper": "Optional. Visible only to the owner. Used for margin calculations.",
         "costPriceClear": "Clear",
         "slugChangeWarning": "Changing the URL may break links to this product.",

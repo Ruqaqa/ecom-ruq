@@ -85,14 +85,18 @@ describe("getProduct — service", () => {
   it("customer: returns ProductPublic shape (Tier-B stripped) even when row has cost_price_minor", async () => {
     const { getProduct } = await import("@/server/services/products/get-product");
     const tenantId = await makeTenant();
-    const id = await seedProduct(tenantId, 42);
+    // Canary value chosen to be distinctive in JSON.stringify — random
+    // UUIDs are hex and contain frequent two-digit substrings (e.g. "42"
+    // collides with hex like "c7133a74-3fc4-4192-…"). 7-digit decimal-only
+    // value avoids that class of false positive.
+    const id = await seedProduct(tenantId, 9911337);
 
     const result = await withTenant(superDb, ctxFor(tenantId), async (tx) =>
       getProduct(tx, { id: tenantId }, "customer", { id }),
     );
     expect(result).not.toBeNull();
     expect((result as Record<string, unknown>).costPriceMinor).toBeUndefined();
-    expect(JSON.stringify(result)).not.toContain("42");
+    expect(JSON.stringify(result)).not.toContain("9911337");
   });
 
   it("returns null on unknown id", async () => {

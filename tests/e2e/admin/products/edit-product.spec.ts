@@ -124,7 +124,9 @@ async function readProductRow(productId: string): Promise<{ status: string; cost
 for (const locale of ["en", "ar"] as const) {
   test(`owner edits a product happy path — ${locale}`, async ({ page }) => {
     test.setTimeout(60_000);
-    const seeded = await seedProduct({ costPriceMinor: 100 });
+    // Seed in halalas (12345 = 123.45 SAR). The form displays riyals;
+    // payload converts back to halalas before reaching the service.
+    const seeded = await seedProduct({ costPriceMinor: 12345 });
     await signIn(page, locale, OWNER_EMAIL);
 
     await page.goto(`/${locale}/admin/products/${seeded.id}`);
@@ -134,7 +136,7 @@ for (const locale of ["en", "ar"] as const) {
 
     // Form is pre-filled — cost-price field is rendered for owner.
     await expect(page.getByTestId("cost-price-field")).toBeVisible();
-    await expect(page.locator("#product-cost-price")).toHaveValue("100");
+    await expect(page.locator("#product-cost-price")).toHaveValue("123.45");
 
     // Submit button starts disabled (no edits yet).
     const submit = page.getByTestId("edit-product-submit");
@@ -146,7 +148,8 @@ for (const locale of ["en", "ar"] as const) {
     await page
       .locator("#product-status")
       .selectOption({ value: "active" });
-    await page.locator("#product-cost-price").fill("250");
+    // Type 250.50 SAR; the form converts to 25050 halalas on submit.
+    await page.locator("#product-cost-price").fill("250.50");
 
     await expect(submit).toBeEnabled();
     await expectAxeClean(page);
@@ -162,7 +165,7 @@ for (const locale of ["en", "ar"] as const) {
 
     const row = await readProductRow(seeded.id);
     expect(row?.status).toBe("active");
-    expect(row?.cost_price_minor).toBe(250);
+    expect(row?.cost_price_minor).toBe(25050);
     expect(row?.name.en).toBe(newNameEn);
   });
 }

@@ -61,7 +61,7 @@ export function EditProductForm({ locale, initial }: Props) {
   const initialHasCostPrice = "costPriceMinor" in initial;
   const [costPriceText, setCostPriceText] = useState<string>(
     initialHasCostPrice && initial.costPriceMinor != null
-      ? String(initial.costPriceMinor)
+      ? (initial.costPriceMinor / 100).toFixed(2)
       : "",
   );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -79,7 +79,9 @@ export function EditProductForm({ locale, initial }: Props) {
     if (status !== initial.status) return true;
     if (initialHasCostPrice) {
       const initialText =
-        initial.costPriceMinor != null ? String(initial.costPriceMinor) : "";
+        initial.costPriceMinor != null
+          ? (initial.costPriceMinor / 100).toFixed(2)
+          : "";
       if (costPriceText !== initialText) return true;
     }
     return false;
@@ -184,13 +186,17 @@ export function EditProductForm({ locale, initial }: Props) {
     if (status !== initial.status) payload.status = status;
     if (initialHasCostPrice) {
       const initialText =
-        initial.costPriceMinor != null ? String(initial.costPriceMinor) : "";
+        initial.costPriceMinor != null
+          ? (initial.costPriceMinor / 100).toFixed(2)
+          : "";
       if (costPriceText !== initialText) {
         if (costPriceText.length === 0) {
           payload.costPriceMinor = null;
         } else {
-          const parsed = Number.parseInt(costPriceText, 10);
-          payload.costPriceMinor = Number.isFinite(parsed) ? parsed : null;
+          const sar = Number.parseFloat(costPriceText);
+          payload.costPriceMinor = Number.isFinite(sar)
+            ? Math.round(sar * 100)
+            : null;
         }
       }
     }
@@ -354,9 +360,9 @@ export function EditProductForm({ locale, initial }: Props) {
               id="product-cost-price"
               name="costPriceMinor"
               type="number"
-              inputMode="numeric"
+              inputMode="decimal"
               min={0}
-              step={1}
+              step={0.01}
               dir="ltr"
               value={costPriceText}
               onChange={(e) => setCostPriceText(e.target.value)}
