@@ -41,6 +41,9 @@ import { dispatchTool, type ToolAuditConfig } from "../audit-adapter";
 import { pingTool } from "./ping";
 import { createProductTool } from "./create-product";
 import { updateProductTool } from "./update-product";
+import { deleteProductTool } from "./delete-product";
+import { restoreProductTool } from "./restore-product";
+import { hardDeleteExpiredProductsTool } from "./hard-delete-expired-products";
 import { listProductsTool } from "./list-products";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
@@ -82,8 +85,20 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
     tool: updateProductTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
-  // 1a.1 — `list_products` read tool. auditMode:"none"; Decision-1
-  // widening still audits forbidden refusals.
+  {
+    tool: deleteProductTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: restoreProductTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: hardDeleteExpiredProductsTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // Reads register with auditMode:"none"; Decision-1 widening still
+  // audits forbidden refusals.
   {
     tool: listProductsTool as McpTool<unknown, unknown>,
     audit: { auditMode: "none" },

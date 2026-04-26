@@ -228,7 +228,8 @@ test("scenario 2: staff PAT — MCP tools/list includes create_product and tools
 
   // Invoke create_product. Staff has Tier-B write access; the gate is
   // roles: ['owner','staff'] at products.create. Successful response
-  // carries a structuredContent with slug + costPriceMinor.
+  // carries a structuredContent with slug + costPriceSar (the MCP
+  // boundary speaks SAR; service stays in halalas).
   const slug = `bearer-cov-staff-${Date.now()}`;
   const call = await mcpCall(request, pat, {
     jsonrpc: "2.0",
@@ -247,7 +248,7 @@ test("scenario 2: staff PAT — MCP tools/list includes create_product and tools
   const content = call.parsed.result?.structuredContent;
   expect(content).toBeTruthy();
   expect((content as Record<string, unknown>).slug).toBe(slug);
-  expect(content).toHaveProperty("costPriceMinor");
+  expect(content).toHaveProperty("costPriceSar");
 });
 
 test("scenario 3: support PAT — MCP tools/list HIDES create_product and tools/call is refused", async ({

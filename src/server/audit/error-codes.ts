@@ -14,6 +14,7 @@ export type AuditErrorCode =
   | "forbidden"
   | "conflict"
   | "stale_write"
+  | "restore_expired"
   | "rls_denied"
   | "rate_limited"
   | "serialization_failure"
@@ -51,5 +52,21 @@ export class SlugTakenError extends Error {
     super("slug_taken");
     this.name = "SlugTakenError";
     if (cause !== undefined) (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
+
+/**
+ * Thrown by `restoreProduct` when the caller asks to un-soft-delete a row
+ * whose `deleted_at` is older than the 30-day recovery window. Distinct
+ * from `not_found` (the row is there) and from `conflict` (no concurrent
+ * write — the precondition is the elapsed window). The audit mapper
+ * recognizes this class (and its TRPCError `.cause` after transport
+ * translation) → audit code 'restore_expired'.
+ */
+export class RestoreWindowExpiredError extends Error {
+  public readonly restoreExpired = true as const;
+  constructor(message: string = "restore_expired") {
+    super(message);
+    this.name = "RestoreWindowExpiredError";
   }
 }

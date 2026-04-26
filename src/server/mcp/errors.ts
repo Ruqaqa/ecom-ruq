@@ -42,6 +42,7 @@ export type McpErrorKind =
   | "validation_failed"
   | "conflict"
   | "stale_write"
+  | "restore_expired"
   | "rls_denied"
   | "serialization_failure"
   | "internal_error";
@@ -101,6 +102,7 @@ export function auditErrorCodeToMcpKind(code: AuditErrorCode): McpErrorKind {
     case "rate_limited":          return "rate_limited";
     case "conflict":              return "conflict";
     case "stale_write":           return "stale_write";
+    case "restore_expired":       return "restore_expired";
     case "rls_denied":            return "rls_denied";
     case "serialization_failure": return "serialization_failure";
     case "internal_error":        return "internal_error";
@@ -120,6 +122,7 @@ export function auditErrorCodeToJsonRpcCode(code: AuditErrorCode): number {
     case "rls_denied":            return -32007;
     case "serialization_failure": return -32008;
     case "stale_write":           return -32009;
+    case "restore_expired":       return -32010;
     case "internal_error":        return -32603;
   }
   // Compile-time exhaustiveness canary. If a ninth AuditErrorCode is
@@ -143,6 +146,7 @@ export function mcpErrorToJsonRpcCode(kind: McpErrorKind): number {
     case "rls_denied":             return -32007;
     case "serialization_failure": return -32008;
     case "stale_write":            return -32009;
+    case "restore_expired":        return -32010;
     case "internal_error":         return -32603;
   }
   // Same exhaustiveness canary shape.

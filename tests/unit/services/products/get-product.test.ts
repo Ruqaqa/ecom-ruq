@@ -143,4 +143,63 @@ describe("getProduct — service", () => {
     const { GetProductInputSchema } = await import("@/server/services/products/get-product");
     expect(Object.keys(GetProductInputSchema.shape)).not.toContain("tenantId");
   });
+
+  // chunk 1a.3 — includeDeleted matrix.
+  it("includeDeleted: false (default) — soft-deleted row returns null", async () => {
+    const { getProduct } = await import("@/server/services/products/get-product");
+    const tenantId = await makeTenant();
+    const id = await seedProduct(tenantId);
+    await superDb.execute(sql`UPDATE products SET deleted_at = now() WHERE id = ${id}`);
+
+    const result = await withTenant(superDb, ctxFor(tenantId), async (tx) =>
+      getProduct(tx, { id: tenantId }, "owner", { id }),
+    );
+    expect(result).toBeNull();
+  });
+
+  it("includeDeleted: true (owner) — returns the deleted row with deletedAt populated", async () => {
+    const { getProduct } = await import("@/server/services/products/get-product");
+    const tenantId = await makeTenant();
+    const id = await seedProduct(tenantId, 4242);
+    await superDb.execute(sql`UPDATE products SET deleted_at = now() WHERE id = ${id}`);
+
+    const result = await withTenant(superDb, ctxFor(tenantId), async (tx) =>
+      getProduct(tx, { id: tenantId }, "owner", { id, includeDeleted: true }),
+    );
+    expect(result).not.toBeNull();
+    expect((result as { id: string; deletedAt: Date | null }).deletedAt).toBeInstanceOf(Date);
+    expect((result as { costPriceMinor: number | null }).costPriceMinor).toBe(4242);
+  });
+
+  it("includeDeleted: true (staff) — returns the deleted row but no costPriceMinor (Tier-B preserved)", async () => {
+    const { getProduct } = await import("@/server/services/products/get-product");
+    const tenantId = await makeTenant();
+    const id = await seedProduct(tenantId, 99);
+    await superDb.execute(sql`UPDATE products SET deleted_at = now() WHERE id = ${id}`);
+
+    const result = await withTenant(superDb, ctxFor(tenantId), async (tx) =>
+      getProduct(tx, { id: tenantId }, "staff", { id, includeDeleted: true }),
+    );
+    expect(result).not.toBeNull();
+    expect((result as Record<string, unknown>).costPriceMinor).toBeUndefined();
+    expect((result as { deletedAt: Date | null }).deletedAt).toBeInstanceOf(Date);
+  });
+
+  it("includeDeleted: true (customer) — defense-in-depth gate throws", async () => {
+    const { getProduct } = await import("@/server/services/products/get-product");
+    const tenantId = await makeTenant();
+    const id = await seedProduct(tenantId);
+    await superDb.execute(sql`UPDATE products SET deleted_at = now() WHERE id = ${id}`);
+
+    let caught: unknown = null;
+    try {
+      await withTenant(superDb, ctxFor(tenantId), async (tx) =>
+        getProduct(tx, { id: tenantId }, "customer", { id, includeDeleted: true }),
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeTruthy();
+    expect(String(caught)).toMatch(/includeDeleted/i);
+  });
 });

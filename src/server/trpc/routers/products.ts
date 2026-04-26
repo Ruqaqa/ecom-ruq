@@ -34,7 +34,6 @@
  * callers (`identity: 'any'` — the default) because mobile/MCP clients
  * need to create products. `tokens.*` is the opposite: session-only.
  */
-import { z } from "zod";
 import { router, publicProcedure, TRPCError } from "../init";
 import { mutationProcedure } from "../middleware/audit-wrap";
 import { requireRole } from "../middleware/require-role";
@@ -51,10 +50,29 @@ import {
   updateProduct,
   UpdateProductInputSchema,
 } from "@/server/services/products/update-product";
-import { getProduct } from "@/server/services/products/get-product";
+import {
+  getProduct,
+  GetProductInputSchema,
+} from "@/server/services/products/get-product";
+import {
+  deleteProduct,
+  DeleteProductInputSchema,
+} from "@/server/services/products/delete-product";
+import {
+  restoreProduct,
+  RestoreProductInputSchema,
+} from "@/server/services/products/restore-product";
+import {
+  hardDeleteExpiredProducts,
+  HardDeleteExpiredProductsInputSchema,
+} from "@/server/services/products/hard-delete-expired-products";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
-import { SlugTakenError, StaleWriteError } from "@/server/audit/error-codes";
+import {
+  RestoreWindowExpiredError,
+  SlugTakenError,
+  StaleWriteError,
+} from "@/server/audit/error-codes";
 
 export const productsRouter = router({
   // Read path — no audit wrap (reads bypass audit per prd §3.7). Role
@@ -92,7 +110,7 @@ export const productsRouter = router({
   // can read for tooling but customers/anonymous can't probe ids.
   get: publicProcedure
     .use(requireRole({ roles: ["owner", "staff"], identity: "any" }))
-    .input(z.object({ id: z.string().uuid() }))
+    .input(GetProductInputSchema)
     .query(async ({ ctx, input }) => {
       const role = deriveRole(ctx);
       if (!role) {
@@ -158,6 +176,105 @@ export const productsRouter = router({
         }
         throw err;
       }
+    }),
+
+  // Soft-delete. Returns a small wire envelope; audit payloads carry
+  // full ProductOwner shapes — required for the append-only chain to
+  // record post-delete state.
+  delete: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(DeleteProductInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await deleteProduct(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.audit;
+        return { id: result.audit.id, deletedAt: result.audit.deletedAt };
+      } catch (err) {
+        if (err instanceof StaleWriteError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "stale_write",
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  // Restore. RestoreWindowExpiredError → BAD_REQUEST `restore_expired`
+  // (precondition fail, not missing row).
+  restore: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(RestoreProductInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await restoreProduct(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.audit;
+        return {
+          id: result.audit.id,
+          deletedAt: null as null,
+          updatedAt: result.audit.updatedAt,
+        };
+      } catch (err) {
+        if (err instanceof RestoreWindowExpiredError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "restore_expired",
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  // Recovery-window sweeper. Owner-only (NOT isWriteRole). Audit
+  // `after` is bounded to {count, ids} — slugs/dryRun never cross into
+  // the append-only chain.
+  hardDeleteExpired: mutationProcedure
+    .use(requireRole({ roles: ["owner"] }))
+    .input(HardDeleteExpiredProductsInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      const result = await hardDeleteExpiredProducts(
+        ctx.tx,
+        { id: ctx.tenant.id },
+        role,
+        input,
+      );
+      ctx.auditPayloads.after = { count: result.count, ids: result.ids };
+      return result;
     }),
 
   create: mutationProcedure

@@ -66,6 +66,10 @@ export const ProductPublicSchema = z.object({
   categoryId: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
+  // Null on live rows; populated for rows surfaced via
+  // `includeDeleted: true`. Storefront/customer reads never see non-null
+  // deletedAt because the default filter excludes those rows.
+  deletedAt: z.date().nullable(),
 });
 export type ProductPublic = z.infer<typeof ProductPublicSchema>;
 

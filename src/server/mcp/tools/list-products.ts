@@ -30,6 +30,9 @@ export const ListProductsMcpInputSchema = z
   .object({
     limit: z.number().int().min(1).max(100).default(10),
     cursor: z.string().min(1).optional(),
+    // Surface soft-deleted rows for owner/staff. Default false: even
+    // MCP callers don't see deleted rows unless they ask.
+    includeDeleted: z.boolean().default(false),
   })
   .strict();
 export type ListProductsMcpInput = z.input<typeof ListProductsMcpInputSchema>;

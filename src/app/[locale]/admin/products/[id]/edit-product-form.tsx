@@ -68,6 +68,12 @@ export function EditProductForm({ locale, initial }: Props) {
   const [topError, setTopError] = useState<string | null>(null);
   const [staleWriteFlash, setStaleWriteFlash] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+
+  const displayName =
+    locale === "ar"
+      ? initial.nameAr || initial.nameEn || initial.slug
+      : initial.nameEn || initial.nameAr || initial.slug;
 
   const dirty = useMemo<boolean>(() => {
     if (slug !== initial.slug) return true;
@@ -111,6 +117,31 @@ export function EditProductForm({ locale, initial }: Props) {
     setSlug(next);
     setSlugError(next.length === 0 ? null : validateSlug(next));
   }
+
+  const removeMutation = trpc.products.delete.useMutation({
+    onSuccess: () => {
+      // Clear dirty BEFORE navigating — the beforeunload listener
+      // would otherwise fire on the redirect.
+      dirtyRef.current = false;
+      router.push(
+        `/${locale}/admin/products?removedId=${encodeURIComponent(displayName)}`,
+      );
+    },
+    onError: (err) => {
+      setShowRemoveConfirm(false);
+      setStaleWriteFlash(false);
+      setTopError(null);
+      if (err.data?.code === "CONFLICT" && err.message === "stale_write") {
+        setStaleWriteFlash(true);
+        return;
+      }
+      if (err.data?.code === "FORBIDDEN" || err.data?.code === "UNAUTHORIZED") {
+        setTopError(t("forbidden"));
+        return;
+      }
+      setTopError(t("error"));
+    },
+  });
 
   const mutation = trpc.products.update.useMutation({
     onSuccess: (data) => {
@@ -367,6 +398,21 @@ export function EditProductForm({ locale, initial }: Props) {
         ) : null}
       </div>
 
+      {/* Destructive Remove product affordance — visually separated
+          from the primary Save/Cancel actions; opens its own confirm
+          dialog. Sits above the sticky action bar so the action bar
+          stays the dominant CTA. */}
+      <div className="border-t border-neutral-200 pt-6 dark:border-neutral-800">
+        <button
+          type="button"
+          onClick={() => setShowRemoveConfirm(true)}
+          data-testid="remove-product-cta"
+          className="flex h-11 items-center justify-center self-start rounded-md border border-red-300 bg-white px-4 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:bg-neutral-950 dark:text-red-400 dark:hover:bg-red-950/50"
+        >
+          {t("removeCta")}
+        </button>
+      </div>
+
       {/* Sticky bottom action bar — Cancel + Save side-by-side, 50/50 on mobile. */}
       <div
         data-testid="edit-product-action-bar"
@@ -426,6 +472,55 @@ export function EditProductForm({ locale, initial }: Props) {
                 className="flex h-11 flex-1 items-center justify-center rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
               >
                 {t("keepEditing")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showRemoveConfirm ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="remove-confirm-title"
+          aria-describedby="remove-confirm-body"
+          data-testid="remove-product-dialog"
+          className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-lg dark:bg-neutral-900">
+            <h2 id="remove-confirm-title" className="text-base font-semibold">
+              {t("removeDialog.heading", { name: displayName })}
+            </h2>
+            <p
+              id="remove-confirm-body"
+              className="mt-2 text-sm text-neutral-600 dark:text-neutral-400"
+            >
+              {t("removeDialog.body")}
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => {
+                  if (removeMutation.isPending) return;
+                  removeMutation.mutate({
+                    id: initial.id,
+                    expectedUpdatedAt: initial.expectedUpdatedAt,
+                    confirm: true,
+                  });
+                }}
+                data-testid="remove-product-confirm"
+                disabled={removeMutation.isPending}
+                className="flex min-h-[44px] flex-1 items-center justify-center rounded-md bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {t("removeDialog.confirm")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowRemoveConfirm(false)}
+                data-testid="remove-product-cancel"
+                className="flex min-h-[44px] flex-1 items-center justify-center rounded-md border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+              >
+                {t("removeDialog.cancel")}
               </button>
             </div>
           </div>

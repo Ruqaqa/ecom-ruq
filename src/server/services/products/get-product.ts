@@ -20,7 +20,7 @@ import {
   type ProductPublic,
 } from "./create-product";
 import type { Tx } from "@/server/db";
-import type { Role } from "@/server/tenant/context";
+import { isWriteRole, type Role } from "@/server/tenant/context";
 
 export interface GetProductTenantInfo {
   id: string;
@@ -28,6 +28,10 @@ export interface GetProductTenantInfo {
 
 export const GetProductInputSchema = z.object({
   id: z.string().uuid(),
+  // Admin "Show removed" detail view. Default false: a soft-deleted id
+  // resolves to null (404 at the route). Owner/staff can opt-in to
+  // fetch the deleted row for the restore UI.
+  includeDeleted: z.boolean().default(false),
 });
 export type GetProductInput = z.input<typeof GetProductInputSchema>;
 
@@ -38,6 +42,11 @@ export async function getProduct(
   input: GetProductInput,
 ): Promise<ProductOwner | ProductPublic | null> {
   const parsed = GetProductInputSchema.parse(input);
+  // Defense-in-depth: only owner/staff may flip includeDeleted. Primary
+  // gate is at the transport.
+  if (parsed.includeDeleted && !isWriteRole(role)) {
+    throw new Error("includeDeleted requires owner or staff role");
+  }
 
   // Cost-price is owner-only for reads (per consolidated brief §A.3 —
   // operator-only per prd §6.5). Staff sees the public shape; owner
@@ -52,21 +61,24 @@ export async function getProduct(
     categoryId: products.categoryId,
     createdAt: products.createdAt,
     updatedAt: products.updatedAt,
+    deletedAt: products.deletedAt,
   };
   const selectCols = ownerRole
     ? { ...baseSelect, costPriceMinor: products.costPriceMinor }
     : baseSelect;
 
+  const whereFilters = [
+    eq(products.id, parsed.id),
+    eq(products.tenantId, tenant.id),
+  ];
+  if (!parsed.includeDeleted) {
+    whereFilters.push(isNull(products.deletedAt));
+  }
+
   const rows = await tx
     .select(selectCols)
     .from(products)
-    .where(
-      and(
-        eq(products.id, parsed.id),
-        eq(products.tenantId, tenant.id),
-        isNull(products.deletedAt),
-      ),
-    )
+    .where(and(...whereFilters))
     .limit(1);
 
   const row = rows[0];

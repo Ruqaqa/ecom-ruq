@@ -28,6 +28,7 @@
 import { TRPCError } from "@trpc/server";
 import { findPgErrorRecord } from "@/server/db/pg-errors";
 import {
+  RestoreWindowExpiredError,
   SlugTakenError,
   StaleWriteError,
   type AuditErrorCode,
@@ -64,6 +65,13 @@ export function mapErrorToAuditCode(err: unknown): AuditErrorCode {
   if (err instanceof SlugTakenError) return "conflict";
   if (err instanceof TRPCError && err.cause instanceof SlugTakenError) {
     return "conflict";
+  }
+  if (err instanceof RestoreWindowExpiredError) return "restore_expired";
+  if (
+    err instanceof TRPCError &&
+    err.cause instanceof RestoreWindowExpiredError
+  ) {
+    return "restore_expired";
   }
   if (err instanceof TRPCError) {
     switch (err.code) {

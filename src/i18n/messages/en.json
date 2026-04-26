@@ -81,7 +81,8 @@
         },
         "status": {
           "draft": "Draft",
-          "active": "Active"
+          "active": "Active",
+          "removed": "Removed"
         },
         "columns": {
           "name": "Name",
@@ -95,7 +96,22 @@
           "next": "Next",
           "backToFirst": "Back to first page"
         },
-        "error": "Could not load products. Try again in a moment."
+        "error": "Could not load products. Try again in a moment.",
+        "showRemoved": "Show removed",
+        "showingRemoved": "Showing removed",
+        "removedBadge": "Removed {relative}",
+        "removedFlash": "Removed: {name}",
+        "restoredFlash": "Restored: {name}",
+        "restoreCta": "Restore",
+        "restoreDialog": {
+          "heading": "Restore {name}?",
+          "body": "It will be visible again on the storefront and the default product list.",
+          "confirm": "Restore",
+          "cancel": "Cancel"
+        },
+        "restoreError": {
+          "windowExpired": "This product can no longer be restored. The 30-day window has passed."
+        }
       },
       "edit": {
         "title": "Edit product",
@@ -116,7 +132,14 @@
         "loadError": "Could not load this product. Try again in a moment.",
         "forbidden": "You don't have permission to edit products.",
         "error": "Could not save your changes. Please check your inputs.",
-        "slugTaken": "That slug is already used by another product."
+        "slugTaken": "That slug is already used by another product.",
+        "removeCta": "Remove product",
+        "removeDialog": {
+          "heading": "Remove {name}?",
+          "body": "This product will be hidden from the storefront and the default product list. You have 30 days to restore it. After 30 days it will be permanently deleted.",
+          "confirm": "Remove",
+          "cancel": "Cancel"
+        }
       }
     },
     "tokens": {

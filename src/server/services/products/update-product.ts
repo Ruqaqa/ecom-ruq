@@ -126,6 +126,7 @@ export async function updateProduct(
       costPriceMinor: products.costPriceMinor,
       createdAt: products.createdAt,
       updatedAt: products.updatedAt,
+      deletedAt: products.deletedAt,
     })
     .from(products)
     .where(
