@@ -12,7 +12,7 @@
  *      (no `required` key on an empty object is spec-compliant).
  *   2. `create_product` advertises a non-empty JSON Schema whose
  *      `properties` reflects the real service-layer schema (slug, name,
- *      status, description?, categoryId?) and whose `required` array
+ *      status, description?) and whose `required` array
  *      contains at least slug and name, with additionalProperties:false
  *      (because the MCP seam uses `.strict()`).
  *   3. `create_product.properties.name` is itself an object schema with
@@ -227,7 +227,6 @@ describe("MCP tools/list advertises real JSON Schema per tool", () => {
         "name",
         "description",
         "status",
-        "categoryId",
       ]),
     );
 
@@ -236,10 +235,9 @@ describe("MCP tools/list advertises real JSON Schema per tool", () => {
     // JSON Schema 'required' is semantically unordered — use arrayContaining.
     // slug has no default; name has no default; both must be required.
     // status has .default() and so is NOT required on the caller side.
-    // description and categoryId are .nullish() → optional.
+    // description is .nullish() → optional.
     expect(required).toEqual(expect.arrayContaining(["slug", "name"]));
     expect(required).not.toContain("description");
-    expect(required).not.toContain("categoryId");
   });
 
   it("create_product: nested `name` property is its own object schema with required:['en','ar']", async () => {

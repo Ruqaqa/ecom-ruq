@@ -53,7 +53,6 @@ const EDITABLE_KEYS = [
   "name",
   "description",
   "status",
-  "categoryId",
   "costPriceMinor",
 ] as const;
 
@@ -65,7 +64,6 @@ export const UpdateProductInputSchema = z
     name: localizedTextPartial({ max: 256 }).optional(),
     description: localizedTextPartial({ max: 4096 }).optional(),
     status: z.enum(["draft", "active"]).optional(),
-    categoryId: z.string().uuid().nullable().optional(),
     // `.nullable().optional()` lets the caller distinguish "leave alone"
     // (key absent) from "clear to null" (key present, value null) —
     // load-bearing for cost_price_minor. Owner-only by the runtime gate
@@ -122,7 +120,6 @@ export async function updateProduct(
       name: products.name,
       description: products.description,
       status: products.status,
-      categoryId: products.categoryId,
       costPriceMinor: products.costPriceMinor,
       createdAt: products.createdAt,
       updatedAt: products.updatedAt,
@@ -176,7 +173,6 @@ export async function updateProduct(
     }
   }
   if ("status" in parsed) setClause.status = parsed.status;
-  if ("categoryId" in parsed) setClause.categoryId = parsed.categoryId;
   if ("costPriceMinor" in parsed) setClause.costPriceMinor = parsed.costPriceMinor;
 
   // 3. UPDATE WHERE id, tenant_id, deleted_at IS NULL, updated_at = $expected.

@@ -85,7 +85,6 @@ describe("createProduct — service", () => {
     expect(result).toMatchObject({
       name: { en: "Sony A7 IV" },
       status: "draft",
-      categoryId: null,
     });
     // Slug round-trips as a plain string.
     expect(typeof (result as { slug: unknown }).slug).toBe("string");

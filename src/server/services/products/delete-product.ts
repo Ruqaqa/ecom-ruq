@@ -67,7 +67,6 @@ export async function deleteProduct(
       name: products.name,
       description: products.description,
       status: products.status,
-      categoryId: products.categoryId,
       costPriceMinor: products.costPriceMinor,
       createdAt: products.createdAt,
       updatedAt: products.updatedAt,

@@ -42,7 +42,6 @@ const MCP_EDITABLE_KEYS = [
   "name",
   "description",
   "status",
-  "categoryId",
   "costPriceSar",
 ] as const;
 
@@ -54,7 +53,6 @@ export const UpdateProductMcpInputSchema = z
     name: localizedTextPartial({ max: 256 }).optional(),
     description: localizedTextPartial({ max: 4096 }).optional(),
     status: z.enum(["draft", "active"]).optional(),
-    categoryId: z.string().uuid().nullable().optional(),
     // Decimal riyals. `.nullable().optional()` keeps the
     // "leave alone" / "clear" / "set" tri-state. Owner-only — the
     // service rejects non-owner callers that include this key.
@@ -121,7 +119,6 @@ export const updateProductTool: McpTool<
     if ("name" in input) serviceInput.name = input.name;
     if ("description" in input) serviceInput.description = input.description;
     if ("status" in input) serviceInput.status = input.status;
-    if ("categoryId" in input) serviceInput.categoryId = input.categoryId;
     if ("costPriceSar" in input) {
       serviceInput.costPriceMinor =
         input.costPriceSar === null || input.costPriceSar === undefined

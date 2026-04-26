@@ -64,7 +64,6 @@ export async function restoreProduct(
       name: products.name,
       description: products.description,
       status: products.status,
-      categoryId: products.categoryId,
       costPriceMinor: products.costPriceMinor,
       createdAt: products.createdAt,
       updatedAt: products.updatedAt,

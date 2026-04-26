@@ -58,7 +58,6 @@ export async function getProduct(
     name: products.name,
     description: products.description,
     status: products.status,
-    categoryId: products.categoryId,
     createdAt: products.createdAt,
     updatedAt: products.updatedAt,
     deletedAt: products.deletedAt,

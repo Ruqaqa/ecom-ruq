@@ -45,6 +45,9 @@ import { deleteProductTool } from "./delete-product";
 import { restoreProductTool } from "./restore-product";
 import { hardDeleteExpiredProductsTool } from "./hard-delete-expired-products";
 import { listProductsTool } from "./list-products";
+import { listCategoriesTool } from "./list-categories";
+import { createCategoryTool } from "./create-category";
+import { updateCategoryTool } from "./update-category";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
 export interface McpTool<TInput, TOutput> {
@@ -102,6 +105,19 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   {
     tool: listProductsTool as McpTool<unknown, unknown>,
     audit: { auditMode: "none" },
+  },
+  // Categories — chunk 1a.4.1.
+  {
+    tool: listCategoriesTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "none" },
+  },
+  {
+    tool: createCategoryTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: updateCategoryTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
   },
   // 7.4 — `run_sql_readonly` registered but locked off. It's a read
   // (reads don't audit per prd §3.7) so `auditMode:"none"`. Its

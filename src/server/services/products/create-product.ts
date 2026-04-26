@@ -46,7 +46,6 @@ export const CreateProductInputSchema = z.object({
   name: localizedText({ max: 256 }),
   description: localizedTextPartial({ max: 4096 }).nullish(),
   status: z.enum(["draft", "active"]).default("draft"),
-  categoryId: z.string().uuid().nullish(),
 });
 // Caller-facing input type — use `z.input` so `.default()` fields stay
 // optional on the caller's side. The internal `parsed` binding uses
@@ -63,7 +62,6 @@ export const ProductPublicSchema = z.object({
     .object({ en: z.string().optional(), ar: z.string().optional() })
     .nullish(),
   status: z.enum(["draft", "active"]),
-  categoryId: z.string().uuid().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
   // Null on live rows; populated for rows surfaced via
@@ -105,7 +103,6 @@ export async function createProduct(
         name: parsed.name,
         description: parsed.description,
         status: parsed.status,
-        categoryId: parsed.categoryId,
       })
       .returning();
   } catch (err) {

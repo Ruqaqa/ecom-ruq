@@ -132,7 +132,6 @@ describe("listProductsTool — output schema", () => {
           name: { en: "A", ar: "أ" },
           description: null,
           status: "draft" as const,
-          categoryId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
           deletedAtIso: null,
