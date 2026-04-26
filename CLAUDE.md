@@ -14,10 +14,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **1a.1 — Admin product list:** landed 2026-04-24.
 - **1a.2 — Edit a product:** landed 2026-04-25 (plus three follow-ups closing on 2026-04-25).
-- **Next chunk: 1a.3 — Soft-delete a product** (recovery window, owner+staff, MCP `delete_product` with `confirm: true`).
-- **Then:** 1a.4 (categories), 1a.5 (variants), 1a.6 (bilingual content polish + missing-translation badge), 1a.7 (image upload pipeline).
+- **1a.3 — Soft-delete a product:** landed 2026-04-25 (30-day recovery window, owner+staff for delete/restore, owner-only for the manual purge sweeper, MCP tools `delete_product` / `restore_product` / `hard_delete_expired_products` all with `confirm: true`). Plus a same-day follow-up sorting removed rows to the top of the admin list under "Show removed", a simplify-pass cleanup (transient marker comments stripped, dead role-guard removed in `listProducts`, `displayName` hoisted in the edit form, `buildListHref` extracted on the admin list page), and an i18n placeholder fix (Remove/Restore dialog headings rendered the literal `{name}` because ICU treats `'…'` as a literal escape — quotes dropped, Playwright case 1 + case 2 now assert the substituted product name).
+- **Next chunk: 1a.4 — Categories.**
+- **Then:** 1a.5 (variants), 1a.6 (bilingual content polish + missing-translation badge), 1a.7 (image upload pipeline).
 
-**Tests at end of 1a.2 cleanup:** 584 vitest across 77 files + 406 Playwright passed / 20 skipped. lint, typecheck, e2e-coverage, role-invariants all clean.
+**Tests at end of 1a.3 cleanup:** 653 vitest across 84 files + 425 Playwright passed / 55 skipped (the skipped count is up because case 3 + case 4 of `soft-delete-product.spec.ts` and the MCP delete/sweeper specs are scoped to a single project for DB-constructed scenarios — locale-independent). lint, typecheck, e2e-coverage, role-invariants all clean.
+
+**Tracked follow-up from 1a.3:** Per-worker tenant isolation for Playwright. The 1a.3 follow-up landed a per-spec slug-prefix scoping helper (`tests/e2e/admin/products/helpers/scoped-row-locator.ts`) which works but isn't a generalized fixture pattern. Architect + security explicitly deferred a deeper refactor to per-worker tenant isolation because it touches global-setup, the tenants table, docker-compose seeded rows, `resolveTenant`, and any seed/fixture path that hard-codes the test tenant id. Pick this up when the admin-products spec count grows past ~6, or when shared-tenant flake rate climbs again — whichever comes first. See `~/.claude/projects/-Users-bassel-development-ecom-ruq/memory/project_per_worker_test_isolation_followup.md`.
 
 **Launch infrastructure (queued at top of Phase 1b)** — scheduled when the storefront is ready to go live: Hetzner VM + Coolify, GitHub Actions pipeline (lint → typecheck → vitest → playwright → lighthouse → coverage → role-invariants → deploy), CI env-lint rejecting dangerous flags in prod, MCP-mutation coverage extension, PgBouncer transaction/session pooling (statement pooling breaks RLS), BunnyCDN, Sentry + beforeSend scrubber (builds on chunk 9), nightly `pg_dump` to Hetzner Storage Box, uptime monitoring, Coolify auto-deploy webhook. Not abandoned — scheduled for when there is a target.
 
