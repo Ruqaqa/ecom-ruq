@@ -66,6 +66,10 @@ import {
   hardDeleteExpiredProducts,
   HardDeleteExpiredProductsInputSchema,
 } from "@/server/services/products/hard-delete-expired-products";
+import {
+  setProductCategories,
+  SetProductCategoriesInputSchema,
+} from "@/server/services/products/set-product-categories";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
 import {
@@ -275,6 +279,47 @@ export const productsRouter = router({
       );
       ctx.auditPayloads.after = { count: result.count, ids: result.ids };
       return result;
+    }),
+
+  // 1a.4.2 — set the categories on a product (set-replace semantics).
+  // OCC anchored on the product row; setting the link set bumps
+  // `products.updated_at` because category linkage is part of the
+  // product's observable state. Audit `before`/`after` carry id+slug
+  // refs (security sign-off shape).
+  setCategories: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(SetProductCategoriesInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await setProductCategories(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.after;
+        return result;
+      } catch (err) {
+        if (err instanceof StaleWriteError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "stale_write",
+            cause: err,
+          });
+        }
+        // BAD_REQUEST `category_not_found` and NOT_FOUND
+        // `product_not_found` flow through; mapErrorToAuditCode classifies
+        // them as `validation_failed` and `not_found` respectively.
+        throw err;
+      }
     }),
 
   create: mutationProcedure

@@ -139,7 +139,111 @@
           "body": "This product will be hidden from the storefront and the default product list. You have 30 days to restore it. After 30 days it will be permanently deleted.",
           "confirm": "Remove",
           "cancel": "Cancel"
+        },
+        "categories": {
+          "heading": "Categories",
+          "addCta": "Add categories",
+          "noneSelected": "No categories yet. Tap Add to choose some.",
+          "chipRemoveAriaLabel": "Remove {path}",
+          "staleError": "One or more selected categories are no longer available. Please review your selections."
         }
+      }
+    },
+    "categoryPicker": {
+      "headingSingle": "Choose a parent",
+      "headingMulti": "Choose categories",
+      "close": "Close",
+      "backdropDismiss": "Dismiss",
+      "searchLabel": "Search categories",
+      "searchPlaceholder": "Search by name or slug",
+      "searchResultCount": "{count, plural, =0 {No matches} one {# match} other {# matches}}",
+      "selectedCount": "{count, plural, =0 {None selected} one {# selected} other {# selected}}",
+      "apply": "Apply",
+      "applyCount": "Apply ({count})",
+      "cancel": "Cancel",
+      "emptyHeading": "No categories yet.",
+      "emptyHelper": "Create one first. The new tab keeps your edits safe.",
+      "emptyCta": "Create a category",
+      "noResults": "No categories match your search.",
+      "disabledDepthCap": "Cannot be a parent (3-level limit).",
+      "disabledSelfOrDescendant": "Cannot select itself or its descendants."
+    },
+    "categories": {
+      "list": {
+        "title": "Categories",
+        "createCta": "Create category",
+        "createdMessage": "Created: {name}",
+        "updatedMessage": "Saved: {name}",
+        "removedFlash": "Removed: {name}",
+        "restoredFlash": "Restored: {name}",
+        "showRemoved": "Show removed",
+        "showingRemoved": "Showing removed",
+        "removedBadge": "Removed {relative}",
+        "columns": {
+          "name": "Name",
+          "slug": "Slug",
+          "updated": "Last updated"
+        },
+        "noName": "(no name)",
+        "translationMissing": "Translation missing",
+        "empty": {
+          "heading": "No categories yet",
+          "body": "Group your products into categories so shoppers can find them.",
+          "cta": "Create your first category"
+        },
+        "error": "Could not load categories. Try again in a moment."
+      },
+      "create": {
+        "title": "New category",
+        "nameEn": "Name (English)",
+        "nameAr": "Name (Arabic)",
+        "descriptionEn": "Description (English)",
+        "descriptionAr": "Description (Arabic)",
+        "slug": "Slug (URL)",
+        "slugHelper": "Lowercase Latin letters, numbers, and hyphens. Shared across both languages — Arabic categories use the same Latin URL.",
+        "slugSyncAriaLabel": "Regenerate slug from name",
+        "slugError": {
+          "empty": "Slug is required.",
+          "too_long": "Slug must be 120 characters or fewer.",
+          "invalid_chars": "Slug can only contain lowercase letters, numbers, and hyphens.",
+          "leading_hyphen": "Slug cannot start with a hyphen.",
+          "trailing_hyphen": "Slug cannot end with a hyphen.",
+          "consecutive_hyphens": "Slug cannot contain two hyphens in a row."
+        },
+        "parent": "Parent category",
+        "parentTopLevel": "(top-level)",
+        "parentChange": "Change parent",
+        "parentHelper": "Pick a parent to nest this category under, or leave it as a top-level category.",
+        "position": "Position",
+        "positionHelper": "Lower numbers come first within the same parent.",
+        "submit": "Create category",
+        "cancel": "Cancel",
+        "forbidden": "You don't have permission to create categories.",
+        "error": "Could not create the category. Please check your inputs.",
+        "slugTaken": "That slug is already used by another category.",
+        "parentNotFound": "The parent you chose is no longer available. Pick another parent.",
+        "depthExceeded": "This parent already has three levels under it. Pick a shallower parent."
+      },
+      "edit": {
+        "title": "Edit category",
+        "submit": "Save changes",
+        "cancel": "Cancel",
+        "slugChangeWarning": "Changing the URL may break links to this category.",
+        "staleWriteError": "This category was changed by someone else. Refresh to see the latest version.",
+        "staleWriteRefresh": "Refresh",
+        "dirtyConfirmTitle": "Discard your changes?",
+        "dirtyConfirmBody": "You have unsaved edits. They will be lost if you leave this page.",
+        "discardConfirm": "Discard changes",
+        "keepEditing": "Keep editing",
+        "notFound": "This category no longer exists.",
+        "notFoundCta": "Back to categories",
+        "loadError": "Could not load this category. Try again in a moment.",
+        "forbidden": "You don't have permission to edit categories.",
+        "error": "Could not save your changes. Please check your inputs.",
+        "slugTaken": "That slug is already used by another category.",
+        "parentNotFound": "The parent you chose is no longer available. Pick another parent.",
+        "depthExceeded": "Moving this category here would exceed the 3-level limit.",
+        "categoryCycle": "A category cannot be its own ancestor."
       }
     },
     "tokens": {

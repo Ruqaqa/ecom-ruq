@@ -29,6 +29,10 @@ import {
   updateCategory,
   UpdateCategoryInputSchema,
 } from "@/server/services/categories/update-category";
+import {
+  listCategoriesForProduct,
+  ListForProductInputSchema,
+} from "@/server/services/categories/list-for-product";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
 import { SlugTakenError, StaleWriteError } from "@/server/audit/error-codes";
@@ -60,6 +64,34 @@ export const categoriesRouter = router({
           role,
           input,
         ),
+      );
+    }),
+
+  // 1a.4.2 — read the categories currently linked to a product. Used by
+  // the admin product-edit RSC to prefill chips. Cross-tenant probes,
+  // phantom productIds, and soft-deleted products all return `{ items: [] }`
+  // — opaque, no existence-leak.
+  listForProduct: publicProcedure
+    .use(requireRole({ roles: ["owner", "staff"], identity: "any" }))
+    .input(ListForProductInputSchema)
+    .query(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      if (!appDb) return { items: [] };
+      const { userId } = ctx.identity;
+      const tokenId =
+        ctx.identity.type === "bearer" ? ctx.identity.tokenId : null;
+      const authedCtx = buildAuthedTenantContext(
+        { id: ctx.tenant.id },
+        { userId, actorType: "user", tokenId, role },
+      );
+      return withTenant(appDb, authedCtx, (tx) =>
+        listCategoriesForProduct(tx, { id: ctx.tenant.id }, role, input),
       );
     }),
 

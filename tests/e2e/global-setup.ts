@@ -10,7 +10,16 @@
  *   - rate-limit Redis keys for the auth bucket prefix are dropped so
  *     Playwright's parallel auth tests don't accumulate hits against the
  *     per-IP limit (dev has no proxy so every caller resolves to
- *     `unknown-ip` and shares one bucket per endpoint).
+ *     `unknown-ip` and shares one bucket per endpoint);
+ *   - dev-tenant catalog rows seeded by prior e2e runs (slug-prefixed
+ *     `e2e-`) are deleted. Categories have no pagination by design (the
+ *     depth-3 cap caps a real tenant at a few hundred), so accumulated
+ *     test rows make `/admin/categories` and the picker render thousands
+ *     of <li>s. WebKit's axe-core walk is O(n²)-ish on that DOM and
+ *     `axe.runPartial` times out — Chromium's faster, so the failure is
+ *     iPhone-only. Sweeping the prefix on setup keeps the page small
+ *     enough for axe on every project. Manually-seeded operator data
+ *     (any slug not starting with `e2e-`) is preserved.
  *
  * We intentionally do NOT truncate auth tables. Between-run isolation is
  * handled by per-test random emails; chunk 8 adds the full test-data
@@ -43,6 +52,26 @@ export default async function globalSetup(): Promise<void> {
       DELETE FROM access_tokens
       WHERE tenant_id = ${devTenantId}
         AND name LIKE ${TEST_TOKEN_PREFIX + "%"}
+    `;
+    // Sweep e2e-prefixed catalog rows. Specs across many runs leave
+    // products + categories behind; categories has no pagination, so the
+    // /admin/categories list and the picker can balloon to thousands of
+    // rows. WebKit's axe-core then times out (Chromium is faster, so the
+    // failure is iPhone-only). The category self-FK + product_categories
+    // FKs are ON DELETE CASCADE, so deleting categories alone is enough
+    // to clean up the whole tree and any cross-links; products are
+    // independent and need their own sweep. Both deletes are scoped to
+    // the dev tenant AND restricted to slugs that begin with `e2e-`, so
+    // operator-seeded data (any other slug shape) survives.
+    await sql`
+      DELETE FROM products
+      WHERE tenant_id = ${devTenantId}
+        AND slug LIKE 'e2e-%'
+    `;
+    await sql`
+      DELETE FROM categories
+      WHERE tenant_id = ${devTenantId}
+        AND slug LIKE 'e2e-%'
     `;
   } finally {
     await sql.end({ timeout: 5 });

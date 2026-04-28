@@ -48,6 +48,7 @@ import { listProductsTool } from "./list-products";
 import { listCategoriesTool } from "./list-categories";
 import { createCategoryTool } from "./create-category";
 import { updateCategoryTool } from "./update-category";
+import { setProductCategoriesTool } from "./set-product-categories";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
 export interface McpTool<TInput, TOutput> {
@@ -117,6 +118,11 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   },
   {
     tool: updateCategoryTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // 1a.4.2 — set the categories on a product (set-replace semantics).
+  {
+    tool: setProductCategoriesTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
   // 7.4 — `run_sql_readonly` registered but locked off. It's a read

@@ -24,7 +24,7 @@ import { categories } from "@/server/db/schema/catalog";
 import { CategorySchema, type Category } from "./create-category";
 import type { Tx } from "@/server/db";
 import { isWriteRole, type Role } from "@/server/tenant/context";
-import { MAX_TREE_DEPTH } from "./validate-category-tree";
+import { computeDepths } from "./validate-category-tree";
 
 export interface ListCategoriesTenantInfo {
   id: string;
@@ -41,31 +41,7 @@ export const ListCategoriesOutputSchema = z.object({
 });
 export type ListCategoriesOutput = z.infer<typeof ListCategoriesOutputSchema>;
 
-/**
- * Walks each row's parent chain in the in-memory map to compute depth.
- * Bounded by MAX_TREE_DEPTH; rows whose chain exceeds the cap are
- * defensively reported as MAX_TREE_DEPTH (the data is malformed, but
- * we don't crash a list call over it).
- */
-function computeDepths(
-  rows: Array<{ id: string; parentId: string | null }>,
-): Map<string, number> {
-  const byId = new Map<string, { parentId: string | null }>();
-  for (const r of rows) byId.set(r.id, { parentId: r.parentId });
-  const depths = new Map<string, number>();
-  for (const r of rows) {
-    let d = 1;
-    let cur: string | null = r.parentId;
-    while (cur !== null && d <= MAX_TREE_DEPTH) {
-      d += 1;
-      const next = byId.get(cur);
-      if (!next) break;
-      cur = next.parentId;
-    }
-    depths.set(r.id, Math.min(d, MAX_TREE_DEPTH));
-  }
-  return depths;
-}
+const arCollator = new Intl.Collator("ar");
 
 export async function listCategories(
   tx: Tx,
@@ -142,7 +118,7 @@ export async function listCategories(
       if (a.position !== b.position) return a.position - b.position;
       const aName = (a.name as { ar?: string }).ar ?? "";
       const bName = (b.name as { ar?: string }).ar ?? "";
-      const cmp = aName.localeCompare(bName, "ar");
+      const cmp = arCollator.compare(aName, bName);
       if (cmp !== 0) return cmp;
       return a.id.localeCompare(b.id);
     });

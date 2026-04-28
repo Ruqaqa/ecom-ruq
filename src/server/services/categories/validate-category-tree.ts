@@ -22,7 +22,7 @@
  * in depth) cannot loop.
  */
 import { TRPCError } from "@trpc/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { categories } from "@/server/db/schema/catalog";
 import type { Tx } from "@/server/db";
 
@@ -136,6 +136,36 @@ export async function assertNoCycle(
 }
 
 /**
+ * Walks each row's parent chain in the in-memory map to compute depth.
+ * Shared between `listCategories` (which already sees the full tenant
+ * tree) and `listCategoriesForProduct` (which sees a subset). Bounded by
+ * MAX_TREE_DEPTH; rows whose chain exceeds the cap are defensively
+ * reported as MAX_TREE_DEPTH. If a parent isn't in the input set the
+ * walk stops and the row's partial depth is returned — correct for the
+ * subset case because the only consumer wants a depth label, not a full
+ * ancestry.
+ */
+export function computeDepths(
+  rows: Array<{ id: string; parentId: string | null }>,
+): Map<string, number> {
+  const byId = new Map<string, { parentId: string | null }>();
+  for (const r of rows) byId.set(r.id, { parentId: r.parentId });
+  const depths = new Map<string, number>();
+  for (const r of rows) {
+    let d = 1;
+    let cur: string | null = r.parentId;
+    while (cur !== null && d <= MAX_TREE_DEPTH) {
+      d += 1;
+      const next = byId.get(cur);
+      if (!next) break;
+      cur = next.parentId;
+    }
+    depths.set(r.id, Math.min(d, MAX_TREE_DEPTH));
+  }
+  return depths;
+}
+
+/**
  * Computes the depth of the deepest descendant of `nodeId` (1 = leaf
  * with no children, 2 = has children but no grandchildren, etc.). Used
  * by `updateCategory` to ensure that re-parenting a subtree doesn't
@@ -153,22 +183,17 @@ export async function maxDescendantDepth(
   let depth = 1;
   for (let level = 0; level < MAX_TREE_DEPTH; level++) {
     const childRows = await tx
-      .select({ id: categories.id, parentId: categories.parentId })
+      .select({ id: categories.id })
       .from(categories)
       .where(
         and(
           eq(categories.tenantId, tenantId),
           isNull(categories.deletedAt),
+          inArray(categories.parentId, frontier),
         ),
       );
-    const next: string[] = [];
-    for (const row of childRows) {
-      if (row.parentId !== null && frontier.includes(row.parentId)) {
-        next.push(row.id);
-      }
-    }
-    if (next.length === 0) return depth;
-    frontier = next;
+    if (childRows.length === 0) return depth;
+    frontier = childRows.map((r) => r.id);
     depth += 1;
   }
   return depth;

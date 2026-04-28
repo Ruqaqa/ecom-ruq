@@ -1,14 +1,14 @@
 /**
- * Chunk 1a.4.1 — MCP smoke spec for the new categories surface.
+ * Chunk 1a.4.2 — End-to-end: MCP `set_product_categories` round-trip
+ * (Block 6, pure-HTTP, single project).
  *
- * Pure-HTTP scenario: mint an owner PAT, then drive create / update /
- * list of categories through the MCP HTTP endpoint with bearer auth.
- * Locale-independent, runs once on `desktop-chromium-en`.
+ * Mint an owner PAT, then drive create_product + create_category +
+ * set_product_categories + listForProduct through the MCP HTTP
+ * endpoint. Verifies that duplicate ids are silently deduped in the
+ * audit `after`.
  *
- * Coverage-lint contract: the literal substrings `categories.create`,
- * `categories.update`, `categories.list` MUST appear in this file so
- * `pnpm check:e2e-coverage` ties the tRPC mutations + read to a
- * Playwright reference.
+ * Coverage-lint substring contract: `set_product_categories` and
+ * `products.setCategories` (set_product_categories, products.setCategories).
  */
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import postgres from "postgres";
@@ -113,21 +113,22 @@ async function mcpCall(
   return { status: res.status(), parsed: parseMcpBody(await res.text()) };
 }
 
-async function deleteCategoryHard(slug: string): Promise<void> {
+async function cleanupBySlugs(
+  productSlug: string,
+  categorySlugs: ReadonlyArray<string>,
+): Promise<void> {
   const sql = postgres(DATABASE_URL, { max: 1 });
   try {
-    await sql`DELETE FROM categories WHERE slug = ${slug}`;
+    await sql`DELETE FROM products WHERE slug = ${productSlug}`;
+    if (categorySlugs.length > 0) {
+      await sql`DELETE FROM categories WHERE slug = ANY(${sql.array(categorySlugs as string[])})`;
+    }
   } finally {
     await sql.end({ timeout: 5 });
   }
 }
 
-/**
- * Round-trip the full MCP categories surface: list_categories,
- * create_category, update_category. Tied to the tRPC mutation names
- * via the literals: categories.create, categories.update, categories.list.
- */
-test("MCP create_category → update_category → list_categories round-trip", async ({
+test("MCP set_product_categories round-trip dedupes duplicate ids", async ({
   page,
   request,
 }, testInfo) => {
@@ -137,69 +138,84 @@ test("MCP create_category → update_category → list_categories round-trip", a
   );
   test.setTimeout(90_000);
   await signIn(page, OWNER_EMAIL);
-  const pat = await mintOwnerPat(page, testTokenName("mcp-cat-roundtrip"));
+  const pat = await mintOwnerPat(page, testTokenName("mcp-pcat"));
 
-  const slug = `cat-mcp-${randomUUID().slice(0, 8)}`;
+  const productSlug = `pcat-prod-${randomUUID().slice(0, 8)}`;
+  const cat1Slug = `pcat-c1-${randomUUID().slice(0, 8)}`;
+  const cat2Slug = `pcat-c2-${randomUUID().slice(0, 8)}`;
+  const cat3Slug = `pcat-c3-${randomUUID().slice(0, 8)}`;
   try {
-    // 1. categories.create equivalent — create_category MCP tool.
-    const created = await mcpCall(request, pat, {
+    // 1. Create product.
+    const createdProd = await mcpCall(request, pat, {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
       params: {
-        name: "create_category",
+        name: "create_product",
         arguments: {
-          slug,
-          name: { en: "MCP Cat", ar: "تجربة" },
+          slug: productSlug,
+          name: { en: "MCP Prod", ar: "منتج" },
         },
       },
     });
-    expect(created.parsed.error).toBeUndefined();
-    expect(created.parsed.result?.isError).not.toBe(true);
-    const createdId = (
-      created.parsed.result?.structuredContent as { id?: string }
+    const prodId = (
+      createdProd.parsed.result?.structuredContent as { id?: string }
     )?.id;
-    expect(createdId).toBeTruthy();
-    const createdUpdatedAt = (
-      created.parsed.result?.structuredContent as { updatedAt?: string }
+    const prodUpdatedAt = (
+      createdProd.parsed.result?.structuredContent as { updatedAt?: string }
     )?.updatedAt;
-    expect(createdUpdatedAt).toBeTruthy();
+    expect(prodId).toBeTruthy();
+    expect(prodUpdatedAt).toBeTruthy();
 
-    // 2. categories.update equivalent — update_category MCP tool.
-    const updated = await mcpCall(request, pat, {
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: {
-        name: "update_category",
-        arguments: {
-          id: createdId,
-          expectedUpdatedAt: createdUpdatedAt,
-          position: 5,
+    // 2. Create three categories.
+    const ids: string[] = [];
+    for (const slug of [cat1Slug, cat2Slug, cat3Slug]) {
+      const c = await mcpCall(request, pat, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "create_category",
+          arguments: {
+            slug,
+            name: { en: slug, ar: slug },
+          },
         },
-      },
-    });
-    expect(updated.parsed.error).toBeUndefined();
-    expect(updated.parsed.result?.isError).not.toBe(true);
-    expect(
-      (updated.parsed.result?.structuredContent as { position?: number })
-        ?.position,
-    ).toBe(5);
+      });
+      const id = (c.parsed.result?.structuredContent as { id?: string })?.id;
+      expect(id).toBeTruthy();
+      ids.push(id!);
+    }
+    const [c1, c2, c3] = ids;
+    void c3; // c3 is created but not attached — used to verify dedupe-only
 
-    // 3. categories.list equivalent — list_categories MCP tool.
-    const listed = await mcpCall(request, pat, {
+    // 3. set_product_categories with duplicates: [c1, c1, c2] dedupes
+    //    to {c1, c2} in the audit `after`.
+    const setRes = await mcpCall(request, pat, {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: { name: "list_categories", arguments: {} },
+      params: {
+        name: "set_product_categories",
+        arguments: {
+          productId: prodId,
+          expectedUpdatedAt: prodUpdatedAt,
+          categoryIds: [c1, c1, c2],
+        },
+      },
     });
-    expect(listed.parsed.error).toBeUndefined();
-    const items =
-      (listed.parsed.result?.structuredContent as {
-        items?: Array<{ id: string }>;
-      })?.items ?? [];
-    expect(items.some((i) => i.id === createdId)).toBe(true);
+    expect(setRes.parsed.error).toBeUndefined();
+    expect(setRes.parsed.result?.isError).not.toBe(true);
+    const after = (
+      setRes.parsed.result?.structuredContent as {
+        after?: { categories: Array<{ id: string; slug: string }> };
+      }
+    )?.after;
+    expect(after?.categories).toHaveLength(2);
+    expect(after?.categories.map((c) => c.id).sort()).toEqual(
+      [c1, c2].sort(),
+    );
   } finally {
-    await deleteCategoryHard(slug);
+    await cleanupBySlugs(productSlug, [cat1Slug, cat2Slug, cat3Slug]);
   }
 });

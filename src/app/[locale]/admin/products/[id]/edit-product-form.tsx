@@ -19,6 +19,8 @@ import {
   validateSlug,
   type SlugValidationError,
 } from "@/lib/product-slug";
+import type { CategoryOption } from "@/lib/categories/build-category-options";
+import { CategoryPickerSheet } from "@/components/admin/category-picker-sheet";
 
 interface InitialValues {
   id: string;
@@ -35,14 +37,23 @@ interface InitialValues {
 interface Props {
   locale: Locale;
   initial: InitialValues;
+  categoryOptions: ReadonlyArray<CategoryOption>;
+  initialCategoryIds: ReadonlyArray<string>;
 }
 
 type FieldErrors = Record<string, string[] | undefined>;
 
-export function EditProductForm({ locale, initial }: Props) {
+export function EditProductForm({
+  locale,
+  initial,
+  categoryOptions,
+  initialCategoryIds,
+}: Props) {
   const t = useTranslations("admin.products.edit");
   const tc = useTranslations("admin.products.create");
+  const tcat = useTranslations("admin.products.edit.categories");
   const router = useRouter();
+  const trpcUtils = trpc.useUtils();
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     setHydrated(true);
@@ -69,11 +80,81 @@ export function EditProductForm({ locale, initial }: Props) {
   const [staleWriteFlash, setStaleWriteFlash] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  // Categories state — initial set comes from listForProduct.
+  // selectedCategoryIds is the live set the user has chosen; baseline
+  // mirrors initialCategoryIds and gets refreshed after a stale-category
+  // recovery so the dirty memo is consistent.
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>(
+    () => [...initialCategoryIds],
+  );
+  const [baselineCategoryIds, setBaselineCategoryIds] = useState<string[]>(
+    () => [...initialCategoryIds],
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [staleCategoriesFlash, setStaleCategoriesFlash] = useState(false);
+  // Track the live OCC token. The first mutation (products.update)
+  // bumps updated_at and returns a fresh value; the second mutation
+  // (products.setCategories) needs that fresh token to pass OCC.
+  const [liveExpectedUpdatedAt, setLiveExpectedUpdatedAt] = useState<string>(
+    initial.expectedUpdatedAt,
+  );
+
+  const categoryOptionsById = useMemo(() => {
+    const m = new Map<string, CategoryOption>();
+    for (const o of categoryOptions) m.set(o.id, o);
+    return m;
+  }, [categoryOptions]);
+
+  // Ref scoped to the Categories section so `onRemoveChip` can find
+  // the *next* chip's remove button after a removal without scanning
+  // unrelated form chrome. Move-focus contract: after a chip's × is
+  // pressed and the chip unmounts, focus lands on the next chip's ×
+  // (DOM order) if one exists, otherwise on the Add Categories button.
+  // requestAnimationFrame is the right pin: by the next paint, React
+  // has reconciled the new chip set into the DOM.
+  const categoriesSectionRef = useRef<HTMLElement | null>(null);
+
+  function onRemoveChip(removedId: string, removedIndex: number): void {
+    setSelectedCategoryIds((prev) => prev.filter((x) => x !== removedId));
+    // After the next paint, find a focus target inside the section.
+    requestAnimationFrame(() => {
+      const root = categoriesSectionRef.current;
+      if (!root) return;
+      const remaining = Array.from(
+        root.querySelectorAll<HTMLButtonElement>(
+          '[data-testid="product-category-chip-remove"]',
+        ),
+      );
+      // Prefer the chip that took the removed chip's slot. If we
+      // removed the last chip, fall back one index. If no chips
+      // remain, fall back to the Add button.
+      const target =
+        remaining[removedIndex] ??
+        remaining[remaining.length - 1] ??
+        document.getElementById("product-categories-add");
+      target?.focus();
+    });
+  }
+
+  // Baseline-key — derived from the live `baselineCategoryIds` (NOT the
+  // prop) so that after a stale-category recovery (which refreshes both
+  // selected and baseline to the server's current set) the dirty memo
+  // collapses to false rather than reporting "still dirty" against a
+  // frozen prop snapshot.
+  const baselineCategoryIdsKey = useMemo(
+    () => [...baselineCategoryIds].sort().join(","),
+    [baselineCategoryIds],
+  );
 
   const displayName =
     locale === "ar"
       ? initial.nameAr || initial.nameEn || initial.slug
       : initial.nameEn || initial.nameAr || initial.slug;
+
+  const selectedCategoryIdsKey = useMemo(
+    () => [...selectedCategoryIds].sort().join(","),
+    [selectedCategoryIds],
+  );
 
   const dirty = useMemo<boolean>(() => {
     if (slug !== initial.slug) return true;
@@ -83,6 +164,8 @@ export function EditProductForm({ locale, initial }: Props) {
     if (descriptionAr !== initial.descriptionAr) return true;
     if (status !== initial.status) return true;
     if (initialHasCostPrice && costPriceText !== initialCostPriceText) return true;
+    // Compare sorted-string keys for set semantics.
+    if (selectedCategoryIdsKey !== baselineCategoryIdsKey) return true;
     return false;
   }, [
     slug,
@@ -95,6 +178,8 @@ export function EditProductForm({ locale, initial }: Props) {
     initial,
     initialHasCostPrice,
     initialCostPriceText,
+    selectedCategoryIdsKey,
+    baselineCategoryIdsKey,
   ]);
 
   // Browser back / tab close confirmation.
@@ -143,10 +228,80 @@ export function EditProductForm({ locale, initial }: Props) {
     },
   });
 
-  const mutation = trpc.products.update.useMutation({
-    onSuccess: (data) => {
+  // setCategories is the second leg of the two-mutation save flow. On
+  // success it redirects to the list. On stale-category (BAD_REQUEST
+  // category_not_found) it surfaces an inline banner and re-queries the
+  // current set so the chips reflect what the server has now.
+  const setCategoriesMutation = trpc.products.setCategories.useMutation({
+    onSuccess: (data, variables) => {
       // Clear dirty BEFORE navigating so the beforeunload listener
       // doesn't fire on the redirect.
+      dirtyRef.current = false;
+      const updatedName =
+        nameEn !== initial.nameEn && nameEn.length > 0
+          ? nameEn
+          : initial.nameEn || initial.slug;
+      // Pass productUpdatedAt forward via the URL so future debugging is
+      // easier; the list page just shows the success flash.
+      void data;
+      void variables;
+      router.push(
+        `/${locale}/admin/products?updatedId=${encodeURIComponent(updatedName)}`,
+      );
+    },
+    onError: async (err) => {
+      if (
+        err.data?.code === "BAD_REQUEST" &&
+        err.message === "category_not_found"
+      ) {
+        // A category we tried to attach is no longer live (raced with a
+        // soft-delete, or the tree was edited in another tab). Surface
+        // the banner and re-query the current set so chips snap back.
+        setStaleCategoriesFlash(true);
+        try {
+          const refreshed = await trpcUtils.categories.listForProduct.fetch({
+            productId: initial.id,
+          });
+          const ids = refreshed.items.map((c) => c.id);
+          setSelectedCategoryIds(ids);
+          setBaselineCategoryIds(ids);
+        } catch {
+          // If the re-query fails, leave the picker state alone — the
+          // user can refresh the page manually.
+        }
+        return;
+      }
+      if (err.data?.code === "CONFLICT" && err.message === "stale_write") {
+        setStaleWriteFlash(true);
+        return;
+      }
+      if (err.data?.code === "FORBIDDEN" || err.data?.code === "UNAUTHORIZED") {
+        setTopError(t("forbidden"));
+        return;
+      }
+      setTopError(t("error"));
+    },
+  });
+
+  const mutation = trpc.products.update.useMutation({
+    onSuccess: (data) => {
+      // First leg succeeded. Capture the freshly-bumped OCC token from
+      // the wire return for the second leg.
+      const newUpdatedAt = data?.updatedAt
+        ? new Date(data.updatedAt).toISOString()
+        : null;
+      if (newUpdatedAt) setLiveExpectedUpdatedAt(newUpdatedAt);
+
+      // If categories also changed, fire setCategories with the fresh
+      // OCC token. Otherwise we're done — clear dirty + redirect.
+      if (selectedCategoryIdsKey !== baselineCategoryIdsKey && newUpdatedAt) {
+        setCategoriesMutation.mutate({
+          productId: initial.id,
+          expectedUpdatedAt: newUpdatedAt,
+          categoryIds: selectedCategoryIds,
+        });
+        return;
+      }
       dirtyRef.current = false;
       const updatedName =
         (data?.name as { en: string } | undefined)?.en ?? data?.slug ?? "";
@@ -222,13 +377,51 @@ export function EditProductForm({ locale, initial }: Props) {
     return payload as Parameters<typeof mutation.mutate>[0];
   }
 
+  // True when any non-category field changed. Used to decide whether
+  // to run the products.update mutation. If only categories changed, we
+  // skip update entirely and call setCategories directly with the
+  // current OCC token.
+  function productFieldsChanged(): boolean {
+    if (slug !== initial.slug) return true;
+    if (nameEn !== initial.nameEn) return true;
+    if (nameAr !== initial.nameAr) return true;
+    if (descriptionEn !== initial.descriptionEn) return true;
+    if (descriptionAr !== initial.descriptionAr) return true;
+    if (status !== initial.status) return true;
+    if (initialHasCostPrice && costPriceText !== initialCostPriceText) {
+      return true;
+    }
+    return false;
+  }
+
   function onSubmit(e: React.FormEvent<HTMLFormElement>): void {
     e.preventDefault();
-    if (mutation.isPending || !dirty) return;
+    if (
+      mutation.isPending ||
+      setCategoriesMutation.isPending ||
+      !dirty
+    ) {
+      return;
+    }
     setFieldErrors({});
     setTopError(null);
     setStaleWriteFlash(false);
-    mutation.mutate(buildPayload());
+    setStaleCategoriesFlash(false);
+
+    if (productFieldsChanged()) {
+      // Two-leg save: products.update first; on success the update
+      // mutation chains into setCategories iff categories also changed.
+      mutation.mutate(buildPayload());
+      return;
+    }
+    // Categories-only edit. Skip update; call setCategories directly
+    // with the current live OCC token (which equals
+    // initial.expectedUpdatedAt because nothing else was saved).
+    setCategoriesMutation.mutate({
+      productId: initial.id,
+      expectedUpdatedAt: liveExpectedUpdatedAt,
+      categoryIds: selectedCategoryIds,
+    });
   }
 
   function onCancelClick(): void {
@@ -245,7 +438,8 @@ export function EditProductForm({ locale, initial }: Props) {
     router.push(`/${locale}/admin/products`);
   }
 
-  const submitDisabled = !hydrated || mutation.isPending || !dirty;
+  const submitDisabled =
+    !hydrated || mutation.isPending || setCategoriesMutation.isPending || !dirty;
   const slugChanged = slug !== initial.slug;
 
   return (
@@ -255,6 +449,15 @@ export function EditProductForm({ locale, initial }: Props) {
       noValidate
       data-testid="edit-product-form"
     >
+      {staleCategoriesFlash ? (
+        <div
+          role="alert"
+          data-testid="product-categories-stale-error"
+          className="rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+        >
+          <p>{tcat("staleError")}</p>
+        </div>
+      ) : null}
       {staleWriteFlash ? (
         <div
           role="alert"
@@ -398,6 +601,63 @@ export function EditProductForm({ locale, initial }: Props) {
         ) : null}
       </div>
 
+      {/* Categories section — chip list + Add button. Sits above the
+          Remove product affordance so the destructive action stays the
+          last item before the sticky save bar. */}
+      <section
+        ref={categoriesSectionRef}
+        data-testid="product-categories-section"
+        className="border-t border-neutral-200 pt-6 dark:border-neutral-800"
+      >
+        <h2 className="text-sm font-medium">{tcat("heading")}</h2>
+        {selectedCategoryIds.length === 0 ? (
+          <p
+            data-testid="product-categories-empty"
+            className="mt-2 text-sm text-neutral-500 dark:text-neutral-400"
+          >
+            {tcat("noneSelected")}
+          </p>
+        ) : (
+          <ul
+            data-testid="product-category-chip-list"
+            className="mt-2 flex flex-wrap gap-2"
+          >
+            {selectedCategoryIds.map((id, index) => {
+              const opt = categoryOptionsById.get(id);
+              const path = opt?.fullPath[locale as "en" | "ar"] ?? id;
+              return (
+                <li
+                  key={id}
+                  data-testid="product-category-chip"
+                  data-id={id}
+                  className="flex items-center gap-1 rounded-full border border-neutral-300 bg-neutral-50 ps-3 pe-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+                >
+                  <span>{path}</span>
+                  <button
+                    type="button"
+                    data-testid="product-category-chip-remove"
+                    aria-label={tcat("chipRemoveAriaLabel", { path })}
+                    onClick={() => onRemoveChip(id, index)}
+                    className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800"
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <button
+          type="button"
+          id="product-categories-add"
+          data-testid="product-categories-add"
+          onClick={() => setPickerOpen(true)}
+          className="mt-3 inline-flex h-11 items-center justify-center rounded-full border border-neutral-300 bg-white px-4 text-sm font-medium hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+        >
+          {tcat("addCta")}
+        </button>
+      </section>
+
       {/* Destructive Remove product affordance — visually separated
           from the primary Save/Cancel actions; opens its own confirm
           dialog. Sits above the sticky action bar so the action bar
@@ -536,6 +796,20 @@ export function EditProductForm({ locale, initial }: Props) {
       >
         {t("cancel")}
       </Link>
+
+      <CategoryPickerSheet
+        open={pickerOpen}
+        mode="multi"
+        searchable={true}
+        selectedIds={selectedCategoryIds}
+        categories={categoryOptions}
+        locale={locale as "en" | "ar"}
+        onApply={(next) => {
+          setSelectedCategoryIds(next);
+          setPickerOpen(false);
+        }}
+        onCancel={() => setPickerOpen(false)}
+      />
     </form>
   );
 }
