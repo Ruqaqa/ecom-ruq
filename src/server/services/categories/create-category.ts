@@ -24,6 +24,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { categories } from "@/server/db/schema/catalog";
 import { localizedText, localizedTextPartial } from "@/lib/i18n/localized";
 import { slugSchema } from "@/lib/product-slug";
@@ -37,12 +38,18 @@ export interface CreateCategoryTenantInfo {
   id: string;
 }
 
+// `position` is now optional at the wire boundary. The admin create form
+// no longer surfaces it (the operator reorders via the up/down arrows on
+// the list page). Direct MCP callers may still supply a numeric position
+// for back-compat — when omitted, the service computes
+// `max(siblings.position) + 1` so new rows land at the bottom of their
+// parent group.
 export const CreateCategoryInputSchema = z.object({
   slug: slugSchema,
   name: localizedText({ max: 256 }),
   description: localizedTextPartial({ max: 4096 }).nullish(),
   parentId: z.string().uuid().nullable().default(null),
-  position: z.number().int().nonnegative().default(0),
+  position: z.number().int().nonnegative().optional(),
 });
 export type CreateCategoryInput = z.input<typeof CreateCategoryInputSchema>;
 
@@ -83,6 +90,34 @@ export async function createCategory(
     depth = parentDepth + 1;
   }
 
+  // Default `position` to `max(siblings.position) + 1` so new rows land
+  // at the bottom of their parent group. MAX over an empty set is NULL
+  // (coalesced to -1 → first row gets position 0). Caller can still
+  // override explicitly via MCP.
+  let resolvedPosition: number;
+  if (parsed.position !== undefined) {
+    resolvedPosition = parsed.position;
+  } else {
+    const parentFilter =
+      parsed.parentId === null
+        ? isNull(categories.parentId)
+        : eq(categories.parentId, parsed.parentId);
+    const maxRows = await tx
+      .select({
+        maxPos: sql<number>`COALESCE(MAX(${categories.position}), -1)`,
+      })
+      .from(categories)
+      .where(
+        and(
+          eq(categories.tenantId, tenant.id),
+          isNull(categories.deletedAt),
+          parentFilter,
+        ),
+      );
+    const currentMax = Number(maxRows[0]?.maxPos ?? -1);
+    resolvedPosition = currentMax + 1;
+  }
+
   let rows;
   try {
     rows = await tx
@@ -93,7 +128,7 @@ export async function createCategory(
         name: parsed.name,
         description: parsed.description,
         parentId: parsed.parentId,
-        position: parsed.position,
+        position: resolvedPosition,
       })
       .returning();
   } catch (err) {

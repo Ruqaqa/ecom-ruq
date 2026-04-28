@@ -179,9 +179,13 @@
         "showRemoved": "عرض المحذوفة",
         "showingRemoved": "عرض المحذوفة الحالي",
         "removedBadge": "حُذفت {relative}",
+        "moveUpAriaLabel": "نقل {name} لأعلى",
+        "moveDownAriaLabel": "نقل {name} لأسفل",
+        "moveError": "تعذّر إعادة الترتيب. حاول مجددًا.",
         "columns": {
           "name": "الاسم",
           "slug": "المعرف",
+          "order": "الترتيب",
           "updated": "آخر تحديث"
         },
         "noName": "(بدون اسم)",
@@ -214,8 +218,6 @@
         "parentTopLevel": "(مستوى أعلى)",
         "parentChange": "تغيير الأب",
         "parentHelper": "اختر فئة أبًا لتدرجها تحته، أو اتركها كفئة في المستوى الأعلى.",
-        "position": "الترتيب",
-        "positionHelper": "الأرقام الأصغر تظهر أولًا داخل نفس الأب.",
         "submit": "إنشاء الفئة",
         "cancel": "إلغاء",
         "forbidden": "ليست لديك صلاحية إنشاء الفئات.",

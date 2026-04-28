@@ -1,5 +1,6 @@
 /**
- * Admin: edit-category form (chunk 1a.4.2 Block 3).
+ * Admin: edit-category form (chunk 1a.4.2 Block 3; position field
+ * removed in 1a.4.2 follow-up).
  *
  * Mirrors `edit-product-form.tsx` for: hydration flag, dirty memo,
  * beforeunload listener, sticky bottom action bar, discard-confirm
@@ -14,7 +15,11 @@
  *     destructive enough that we don't help the user generate one).
  *   - Adds the parent picker (single-select, search enabled) with
  *     `excludeIds = [self.id, ...descendantIds]` passed in by the RSC.
- *   - Adds a position number field (mirrors create form).
+ *
+ * Position is *not* surfaced on the edit form. The MCP `update_category`
+ * tool still accepts an explicit `position` for back-compat with the
+ * operator's MCP workflow; in-app reordering happens via the up/down
+ * arrows on the categories list page.
  *
  * Sparse update payload: only changed keys go into the mutation. The
  * `parentId` field is special-cased — sending `null` means "make root",
@@ -44,7 +49,6 @@ interface InitialValues {
   descriptionEn: string;
   descriptionAr: string;
   parentId: string | null;
-  position: number;
   expectedUpdatedAt: string;
 }
 
@@ -78,9 +82,6 @@ export function EditCategoryForm({
   const [descriptionEn, setDescriptionEn] = useState(initial.descriptionEn);
   const [descriptionAr, setDescriptionAr] = useState(initial.descriptionAr);
   const [parentId, setParentId] = useState<string | null>(initial.parentId);
-  const [positionText, setPositionText] = useState<string>(
-    String(initial.position),
-  );
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -105,7 +106,6 @@ export function EditCategoryForm({
     if (descriptionEn !== initial.descriptionEn) return true;
     if (descriptionAr !== initial.descriptionAr) return true;
     if (parentId !== initial.parentId) return true;
-    if (positionText !== String(initial.position)) return true;
     return false;
   }, [
     slug,
@@ -114,7 +114,6 @@ export function EditCategoryForm({
     descriptionEn,
     descriptionAr,
     parentId,
-    positionText,
     initial,
   ]);
 
@@ -227,10 +226,6 @@ export function EditCategoryForm({
       // null = make root; uuid = re-parent. Both are explicit-set
       // (key present) — service contract from 1a.4.1.
       payload.parentId = parentId;
-    }
-    if (positionText !== String(initial.position)) {
-      const num = Number.parseInt(positionText, 10);
-      payload.position = Number.isFinite(num) && num >= 0 ? num : 0;
     }
     return payload as Parameters<typeof mutation.mutate>[0];
   }
@@ -382,33 +377,6 @@ export function EditCategoryForm({
           </button>
           <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
             {tc("parentHelper")}
-          </p>
-        </div>
-
-        <div>
-          <label
-            htmlFor="category-position"
-            className="block text-sm font-medium"
-          >
-            {tc("position")}
-          </label>
-          <input
-            id="category-position"
-            data-testid="category-position"
-            name="position"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={positionText}
-            onChange={(e) => setPositionText(e.target.value)}
-            className="mt-1 block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-900"
-            aria-describedby="category-position-helper"
-          />
-          <p
-            id="category-position-helper"
-            className="mt-1 text-xs text-neutral-600 dark:text-neutral-400"
-          >
-            {tc("positionHelper")}
           </p>
         </div>
       </div>

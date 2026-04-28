@@ -179,9 +179,13 @@
         "showRemoved": "Show removed",
         "showingRemoved": "Showing removed",
         "removedBadge": "Removed {relative}",
+        "moveUpAriaLabel": "Move {name} up",
+        "moveDownAriaLabel": "Move {name} down",
+        "moveError": "Could not reorder. Try again.",
         "columns": {
           "name": "Name",
           "slug": "Slug",
+          "order": "Order",
           "updated": "Last updated"
         },
         "noName": "(no name)",
@@ -214,8 +218,6 @@
         "parentTopLevel": "(top-level)",
         "parentChange": "Change parent",
         "parentHelper": "Pick a parent to nest this category under, or leave it as a top-level category.",
-        "position": "Position",
-        "positionHelper": "Lower numbers come first within the same parent.",
         "submit": "Create category",
         "cancel": "Cancel",
         "forbidden": "You don't have permission to create categories.",

@@ -41,6 +41,7 @@ import {
   type ListCategoriesOutput,
 } from "@/server/services/categories/list-categories";
 import { pickLocalizedName } from "@/lib/i18n/pick-localized-name";
+import { CategoryReorderButtons } from "./category-reorder-buttons";
 
 export async function generateMetadata({
   params,
@@ -134,6 +135,33 @@ export default async function AdminCategoriesListPage({
     month: "short",
     day: "numeric",
   } as const;
+
+  // For each LIVE row, decide whether the up arrow / down arrow render.
+  // Hidden on the first / last live sibling in the same parent group.
+  // Soft-deleted rows never get arrows (they sit in the "removed" bucket
+  // ahead of the live tree under "Show removed" and are not reorderable).
+  // The list is already sorted in sibling order by `listCategories` so a
+  // single pass over `page.items` is sufficient.
+  const reorderFlags = new Map<string, { showUp: boolean; showDown: boolean }>();
+  {
+    // Group live items by parent_id while preserving render order.
+    const groups = new Map<string, string[]>();
+    for (const c of page.items) {
+      if (c.deletedAt !== null) continue;
+      const key = c.parentId ?? "__root__";
+      const arr = groups.get(key);
+      if (arr) arr.push(c.id);
+      else groups.set(key, [c.id]);
+    }
+    for (const ids of groups.values()) {
+      ids.forEach((id, idx) => {
+        reorderFlags.set(id, {
+          showUp: idx > 0,
+          showDown: idx < ids.length - 1,
+        });
+      });
+    }
+  }
 
   return (
     <main className="min-h-screen p-4 pb-20 sm:p-6 sm:pt-12">
@@ -243,6 +271,10 @@ export default async function AdminCategoriesListPage({
                 const isRemoved = c.deletedAt !== null;
                 const indent =
                   c.depth === 3 ? "ms-8" : c.depth === 2 ? "ms-4" : "ms-0";
+                const flags = reorderFlags.get(c.id) ?? {
+                  showUp: false,
+                  showDown: false,
+                };
                 return (
                   <li
                     key={c.id}
@@ -256,44 +288,56 @@ export default async function AdminCategoriesListPage({
                         : `${indent} rounded-lg border border-neutral-200 dark:border-neutral-800`
                     }
                   >
-                    <Link
-                      href={`/${rawLocale}/admin/categories/${c.id}`}
-                      data-testid="category-row-link"
-                      className="flex min-h-[44px] flex-col gap-2 rounded-lg p-4 hover:bg-neutral-50 dark:hover:bg-neutral-900"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <p
-                            className={
-                              isRemoved
-                                ? "truncate text-base font-medium text-neutral-500 line-through dark:text-neutral-500"
-                                : "truncate text-base font-medium"
-                            }
-                          >
-                            {displayName}
-                          </p>
-                          <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
-                            {format.dateTime(c.updatedAt, dateOptions)} ·{" "}
-                            {c.slug}
-                          </p>
+                    <div className="flex flex-col gap-2 p-2">
+                      <Link
+                        href={`/${rawLocale}/admin/categories/${c.id}`}
+                        data-testid="category-row-link"
+                        className="flex min-h-[44px] flex-col gap-2 rounded-lg p-2 hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p
+                              className={
+                                isRemoved
+                                  ? "truncate text-base font-medium text-neutral-500 line-through dark:text-neutral-500"
+                                  : "truncate text-base font-medium"
+                              }
+                            >
+                              {displayName}
+                            </p>
+                            <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                              {format.dateTime(c.updatedAt, dateOptions)} ·{" "}
+                              {c.slug}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      {picked.isFallback ? (
-                        <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
-                          {t("translationMissing")}
-                        </span>
+                        {picked.isFallback ? (
+                          <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                            {t("translationMissing")}
+                          </span>
+                        ) : null}
+                        {isRemoved && c.deletedAt ? (
+                          <span
+                            data-testid="removed-badge"
+                            className="inline-block rounded bg-neutral-200 px-2 py-0.5 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                          >
+                            {t("removedBadge", {
+                              relative: format.relativeTime(c.deletedAt),
+                            })}
+                          </span>
+                        ) : null}
+                      </Link>
+                      {!isRemoved ? (
+                        <div className="flex justify-end px-2 pb-1">
+                          <CategoryReorderButtons
+                            categoryId={c.id}
+                            displayName={displayName}
+                            showUp={flags.showUp}
+                            showDown={flags.showDown}
+                          />
+                        </div>
                       ) : null}
-                      {isRemoved && c.deletedAt ? (
-                        <span
-                          data-testid="removed-badge"
-                          className="inline-block rounded bg-neutral-200 px-2 py-0.5 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
-                        >
-                          {t("removedBadge", {
-                            relative: format.relativeTime(c.deletedAt),
-                          })}
-                        </span>
-                      ) : null}
-                    </Link>
+                    </div>
                   </li>
                 );
               })}
@@ -316,6 +360,9 @@ export default async function AdminCategoriesListPage({
                     <th scope="col" className="px-4 py-3 text-start">
                       {t("columns.updated")}
                     </th>
+                    <th scope="col" className="px-4 py-3 text-start">
+                      {t("columns.order")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
@@ -329,6 +376,10 @@ export default async function AdminCategoriesListPage({
                         : c.depth === 2
                           ? "ps-6"
                           : "ps-0";
+                    const flags = reorderFlags.get(c.id) ?? {
+                      showUp: false,
+                      showDown: false,
+                    };
                     return (
                       <tr
                         key={c.id}
@@ -373,6 +424,16 @@ export default async function AdminCategoriesListPage({
                         </td>
                         <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                           {format.dateTime(c.updatedAt, dateOptions)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {!isRemoved ? (
+                            <CategoryReorderButtons
+                              categoryId={c.id}
+                              displayName={displayName}
+                              showUp={flags.showUp}
+                              showDown={flags.showDown}
+                            />
+                          ) : null}
                         </td>
                       </tr>
                     );

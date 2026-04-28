@@ -153,7 +153,6 @@ export default async function EditCategoryPage({
               descriptionEn: category.description?.en ?? "",
               descriptionAr: category.description?.ar ?? "",
               parentId: category.parentId,
-              position: category.position,
               expectedUpdatedAt: category.updatedAt.toISOString(),
             }}
             categoryOptions={categoryOptions}

@@ -1,14 +1,19 @@
 /**
- * Admin: create-category form (chunk 1a.4.2 Block 2).
+ * Admin: create-category form (chunk 1a.4.2 Block 2; position field
+ * removed in 1a.4.2 follow-up).
  *
  * Mirrors `create-product-form.tsx` for the slug auto-derive + sync,
  * inline-error pattern, and forbidden / generic top-error fallbacks.
  *
  * Adds:
  *   - parent picker via the shared `<CategoryPickerSheet mode="single" />`,
- *   - position number field,
  *   - server-error mapping for `parent_not_found` and
  *     `category_depth_exceeded` from the service layer.
+ *
+ * Position is *not* surfaced — the service auto-fills it as
+ * `max(siblings.position) + 1` (new rows land at the bottom of their
+ * parent group), and operators reorder via the up/down arrows on the
+ * categories list page.
  */
 "use client";
 
@@ -52,7 +57,6 @@ export function CreateCategoryForm({
   const [slugDirty, setSlugDirty] = useState(false);
   const [slugError, setSlugError] = useState<SlugValidationError | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
-  const [position, setPosition] = useState<string>("0");
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -148,13 +152,14 @@ export function CreateCategoryForm({
             ...(descriptionAr.length > 0 ? { ar: descriptionAr } : {}),
           }
         : undefined;
-    const positionNum = Number.parseInt(position, 10);
+    // No position in the wire payload — the service auto-fills it as
+    // `max(siblings.position) + 1` so new rows land at the bottom of
+    // their parent group. Operators reorder from the list page.
     mutation.mutate({
       slug,
       name: { en: nameEn, ar: nameAr },
       ...(description !== undefined ? { description } : {}),
       parentId,
-      position: Number.isFinite(positionNum) && positionNum >= 0 ? positionNum : 0,
     });
   }
 
@@ -263,30 +268,6 @@ export function CreateCategoryForm({
           </button>
           <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
             {t("parentHelper")}
-          </p>
-        </div>
-
-        <div>
-          <label htmlFor="category-position" className="block text-sm font-medium">
-            {t("position")}
-          </label>
-          <input
-            id="category-position"
-            data-testid="category-position"
-            name="position"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={position}
-            onChange={(e) => setPosition(e.target.value)}
-            className="mt-1 block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-900"
-            aria-describedby="category-position-helper"
-          />
-          <p
-            id="category-position-helper"
-            className="mt-1 text-xs text-neutral-600 dark:text-neutral-400"
-          >
-            {t("positionHelper")}
           </p>
         </div>
 

@@ -33,6 +33,8 @@ import {
   listCategoriesForProduct,
   ListForProductInputSchema,
 } from "@/server/services/categories/list-for-product";
+import { moveCategory } from "@/server/services/categories/move-category";
+import { z } from "zod";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
 import { SlugTakenError, StaleWriteError } from "@/server/audit/error-codes";
@@ -118,6 +120,53 @@ export const categoriesRouter = router({
         }
         throw err;
       }
+    }),
+
+  // 1a.4.2 follow-up — sibling-swap reorder. Replaces the operator-facing
+  // "Position" field; the admin list page exposes up/down arrows, MCP
+  // exposes `move_category_up` / `move_category_down`.
+  moveUp: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      const result = await moveCategory(
+        ctx.tx,
+        { id: ctx.tenant.id },
+        role,
+        { id: input.id, direction: "up" },
+      );
+      ctx.auditPayloads.before = result.before;
+      ctx.auditPayloads.after = result.after;
+      return result;
+    }),
+
+  moveDown: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      const result = await moveCategory(
+        ctx.tx,
+        { id: ctx.tenant.id },
+        role,
+        { id: input.id, direction: "down" },
+      );
+      ctx.auditPayloads.before = result.before;
+      ctx.auditPayloads.after = result.after;
+      return result;
     }),
 
   update: mutationProcedure
