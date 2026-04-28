@@ -303,7 +303,6 @@ export function CreateCategoryForm({
       <CategoryPickerSheet
         open={pickerOpen}
         mode="single"
-        searchable={false}
         selectedIds={parentId ? [parentId] : []}
         categories={categoryOptions}
         locale={locale as "en" | "ar"}

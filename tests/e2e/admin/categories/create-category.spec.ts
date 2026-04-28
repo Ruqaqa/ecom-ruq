@@ -294,3 +294,107 @@ test("admin create category — Escape closes picker; backdrop closes picker", a
     .click({ force: true, position: { x: 5, y: 5 } });
   await expect(page.getByTestId("category-picker-sheet")).toHaveCount(0);
 });
+
+// 1a.4.2 follow-up: the parent picker on the create-category page must
+// expose its search input and typing into it must filter rows. Both
+// localized name and slug are matched (case-insensitive). Regression
+// test for `searchable={false}` having been wired in by mistake.
+for (const locale of ["en", "ar"] as const) {
+  test(`admin create category — parent-picker search filters rows on typing, ${locale}`, async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+
+    // Two distinct seeds: localized names per locale, plus a Latin slug
+    // we can match independently. The third (a "decoy") must NOT appear
+    // when we filter for one of the others.
+    const tagPens = locale === "en" ? "Pens" : "أقلام";
+    const tagBooks = locale === "en" ? "Notebooks" : "دفاتر";
+    const tagDecoy = locale === "en" ? "Erasers" : "محايات";
+    const slugPens = uniqueSlug("search-pens");
+    const slugBooks = uniqueSlug("search-books");
+    const slugDecoy = uniqueSlug("search-decoy");
+    const pens = await seedCategoryInDevTenant({
+      slug: slugPens,
+      name: { en: "Pens", ar: "أقلام" },
+    });
+    const books = await seedCategoryInDevTenant({
+      slug: slugBooks,
+      name: { en: "Notebooks", ar: "دفاتر" },
+    });
+    const decoy = await seedCategoryInDevTenant({
+      slug: slugDecoy,
+      name: { en: "Erasers", ar: "محايات" },
+    });
+
+    await signIn(page, locale, OWNER_EMAIL);
+    await page.goto(`/${locale}/admin/categories/new`);
+    await page.getByTestId("category-parent-trigger").click();
+    await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
+
+    // The search input must be rendered.
+    const search = page.getByTestId("category-picker-search");
+    await expect(search).toBeVisible();
+
+    // axe with picker open and search visible.
+    await expectAxeClean(page);
+
+    // All three seeded rows present before any filtering.
+    const pensRow = page.locator(
+      `[data-testid="category-picker-row"][data-id="${pens.id}"]`,
+    );
+    const booksRow = page.locator(
+      `[data-testid="category-picker-row"][data-id="${books.id}"]`,
+    );
+    const decoyRow = page.locator(
+      `[data-testid="category-picker-row"][data-id="${decoy.id}"]`,
+    );
+    await expect(pensRow).toBeVisible();
+    await expect(booksRow).toBeVisible();
+    await expect(decoyRow).toBeVisible();
+
+    // Filter by localized name — only the matching row stays visible.
+    await search.fill(tagPens);
+    await expect(pensRow).toBeVisible();
+    await expect(booksRow).toHaveCount(0);
+    await expect(decoyRow).toHaveCount(0);
+
+    // Switch the query — different match, again only the matching row.
+    await search.fill(tagBooks);
+    await expect(booksRow).toBeVisible();
+    await expect(pensRow).toHaveCount(0);
+    await expect(decoyRow).toHaveCount(0);
+
+    // Slug match works too — a Latin substring of the books slug must
+    // surface that row regardless of locale.
+    await search.fill(slugBooks);
+    await expect(booksRow).toBeVisible();
+    await expect(pensRow).toHaveCount(0);
+    await expect(decoyRow).toHaveCount(0);
+
+    // Garbage query — no rows; the no-results message renders instead.
+    await search.fill("zzz-no-such-category-zzz");
+    await expect(
+      page.getByTestId("category-picker-no-results"),
+    ).toBeVisible();
+
+    // Clearing the search restores all rows.
+    await search.fill("");
+    await expect(pensRow).toBeVisible();
+    await expect(booksRow).toBeVisible();
+    await expect(decoyRow).toBeVisible();
+
+    // Picking a row after a filter still works end-to-end (Apply commits
+    // the visible row's id to the parent display).
+    await search.fill(tagDecoy);
+    await expect(decoyRow).toBeVisible();
+    await decoyRow.locator('[data-testid="category-picker-radio"]').check();
+    await page.getByTestId("category-picker-apply").click();
+    await expect(page.getByTestId("category-picker-sheet")).toHaveCount(0);
+    const decoyDisplayName = locale === "en" ? "Erasers" : "محايات";
+    await expect(
+      page.getByTestId("category-parent-display"),
+    ).toContainText(decoyDisplayName);
+  });
+}
+

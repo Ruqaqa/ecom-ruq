@@ -331,3 +331,47 @@ test("admin edit category — beforeunload listener registers when dirty (sanity
   // path running at all.
   await expect(page.getByTestId("edit-category-submit")).toBeEnabled();
 });
+
+// 1a.4.2 follow-up: parent-picker search input must render and filter
+// rows on typing. The locale matrix is covered by the create-category
+// regression test; this asserts the same fix lands on the edit page.
+test("admin edit category — parent-picker search filters rows on typing", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const target = await seedCategoryInDevTenant({
+    slug: uniqueSlug("ec-search-target"),
+  });
+  const candidate = await seedCategoryInDevTenant({
+    slug: uniqueSlug("ec-search-candidate"),
+    name: { en: "Audio Cables", ar: "كابلات صوتية" },
+  });
+  const decoy = await seedCategoryInDevTenant({
+    slug: uniqueSlug("ec-search-decoy"),
+    name: { en: "Speakers", ar: "مكبرات صوت" },
+  });
+
+  await signIn(page, "en", OWNER_EMAIL);
+  await page.goto(`/en/admin/categories/${target.id}`);
+  await page.getByTestId("category-parent-trigger").click();
+  await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
+
+  const search = page.getByTestId("category-picker-search");
+  await expect(search).toBeVisible();
+
+  // axe with picker open (search visible).
+  await expectAxeClean(page);
+
+  const candidateRow = page.locator(
+    `[data-testid="category-picker-row"][data-id="${candidate.id}"]`,
+  );
+  const decoyRow = page.locator(
+    `[data-testid="category-picker-row"][data-id="${decoy.id}"]`,
+  );
+  await expect(candidateRow).toBeVisible();
+  await expect(decoyRow).toBeVisible();
+
+  await search.fill("Audio");
+  await expect(candidateRow).toBeVisible();
+  await expect(decoyRow).toHaveCount(0);
+});

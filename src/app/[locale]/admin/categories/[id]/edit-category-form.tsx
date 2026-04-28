@@ -12,7 +12,7 @@
  *   - No cost-price field — Tier-B doesn't apply to categories.
  *   - No `↻ slug-sync` button on edit (architect call: editing slug is
  *     destructive enough that we don't help the user generate one).
- *   - Adds the parent picker (single-select, searchable=false) with
+ *   - Adds the parent picker (single-select, search enabled) with
  *     `excludeIds = [self.id, ...descendantIds]` passed in by the RSC.
  *   - Adds a position number field (mirrors create form).
  *
@@ -481,7 +481,6 @@ export function EditCategoryForm({
       <CategoryPickerSheet
         open={pickerOpen}
         mode="single"
-        searchable={false}
         selectedIds={parentId ? [parentId] : []}
         categories={categoryOptions}
         excludeIds={excludeIds}
