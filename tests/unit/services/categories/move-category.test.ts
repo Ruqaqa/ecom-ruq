@@ -274,13 +274,12 @@ describe("moveCategory — service", () => {
     expect((caught as TRPCError).code).toBe("NOT_FOUND");
   });
 
-  it("tie-break: equal positions resolve deterministically by name then id", async () => {
+  it("ties self-heal: 3 siblings tied at 0, tap up on B → group renumbers to stride 10 with B and A swapped", async () => {
     const { moveCategory } = await import(
       "@/server/services/categories/move-category"
     );
     const tenantId = await makeTenant();
-    // Three siblings, all at position 0. Sibling order by name->>'en':
-    // A, B, C → ids[0]=A, ids[1]=B, ids[2]=C in render order.
+    // Three siblings tied at position 0. Render order by name: A, B, C.
     const a = await seedCategory(tenantId, {
       name: { en: "A", ar: "أ" },
       position: 0,
@@ -294,17 +293,95 @@ describe("moveCategory — service", () => {
       position: 0,
     });
 
-    // Move B up: B should land at position -1 (one slot before A's
-    // position, A unchanged). A and C unchanged.
     const out = await withTenant(superDb, ctxFor(tenantId), (tx) =>
       moveCategory(tx, { id: tenantId }, "owner", { id: b, direction: "up" }),
     );
     expect(out.noop).toBe(false);
 
+    // Final render order: B, A, C → renumbered at stride 10.
     const positions = await readPositions([a, b, c]);
-    expect(positions.get(b)).toBe(-1);
+    expect(positions.get(b)).toBe(0);
+    expect(positions.get(a)).toBe(10);
+    expect(positions.get(c)).toBe(20);
+  });
+
+  it("multi-tie: 4 siblings tied at 0, tap up on the 4th → moves exactly one slot, not past everyone", async () => {
+    const { moveCategory } = await import(
+      "@/server/services/categories/move-category"
+    );
+    const tenantId = await makeTenant();
+    // Render order by name: A, B, C, D — all tied at 0.
+    const a = await seedCategory(tenantId, {
+      name: { en: "AA", ar: "أ" },
+      position: 0,
+    });
+    const b = await seedCategory(tenantId, {
+      name: { en: "BB", ar: "ب" },
+      position: 0,
+    });
+    const c = await seedCategory(tenantId, {
+      name: { en: "CC", ar: "س" },
+      position: 0,
+    });
+    const d = await seedCategory(tenantId, {
+      name: { en: "DD", ar: "د" },
+      position: 0,
+    });
+
+    // Tap up on D. Expected final render order: A, B, D, C.
+    await withTenant(superDb, ctxFor(tenantId), (tx) =>
+      moveCategory(tx, { id: tenantId }, "owner", { id: d, direction: "up" }),
+    );
+
+    const positions = await readPositions([a, b, c, d]);
     expect(positions.get(a)).toBe(0);
-    expect(positions.get(c)).toBe(0);
+    expect(positions.get(b)).toBe(10);
+    expect(positions.get(d)).toBe(20);
+    expect(positions.get(c)).toBe(30);
+
+    // Tap up on D again. Expected final render order: A, D, B, C.
+    await withTenant(superDb, ctxFor(tenantId), (tx) =>
+      moveCategory(tx, { id: tenantId }, "owner", { id: d, direction: "up" }),
+    );
+    const after2 = await readPositions([a, b, c, d]);
+    expect(after2.get(a)).toBe(0);
+    expect(after2.get(d)).toBe(10);
+    expect(after2.get(b)).toBe(20);
+    expect(after2.get(c)).toBe(30);
+  });
+
+  it("multi-tie down: 4 siblings tied at 0, tap down on first → moves exactly one slot", async () => {
+    const { moveCategory } = await import(
+      "@/server/services/categories/move-category"
+    );
+    const tenantId = await makeTenant();
+    const a = await seedCategory(tenantId, {
+      name: { en: "AA", ar: "أ" },
+      position: 0,
+    });
+    const b = await seedCategory(tenantId, {
+      name: { en: "BB", ar: "ب" },
+      position: 0,
+    });
+    const c = await seedCategory(tenantId, {
+      name: { en: "CC", ar: "س" },
+      position: 0,
+    });
+    const d = await seedCategory(tenantId, {
+      name: { en: "DD", ar: "د" },
+      position: 0,
+    });
+
+    // Tap down on A. Expected final render order: B, A, C, D.
+    await withTenant(superDb, ctxFor(tenantId), (tx) =>
+      moveCategory(tx, { id: tenantId }, "owner", { id: a, direction: "down" }),
+    );
+
+    const positions = await readPositions([a, b, c, d]);
+    expect(positions.get(b)).toBe(0);
+    expect(positions.get(a)).toBe(10);
+    expect(positions.get(c)).toBe(20);
+    expect(positions.get(d)).toBe(30);
   });
 
   it("composition: tap up then tap down on the same row returns to the original order", async () => {

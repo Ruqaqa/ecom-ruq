@@ -341,6 +341,86 @@ test("admin categories reorder — last row's down arrow is not rendered", async
   ).toHaveCount(1);
 });
 
+test("admin categories reorder — multi-tie regression: 4 siblings tied at the same position move exactly one slot per tap, not past the whole tied block", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const s = scopedSlugs("multi-tie");
+  // Seed four siblings under a dedicated parent, all at the same
+  // position. Render order is by name → A, B, C, D.
+  const parent = await seedCategoryInDevTenant({
+    slug: s.slug("parent"),
+    name: { en: "MultiTie-Parent", ar: "ر-أب" },
+    position: 0,
+  });
+  const a = await seedCategoryInDevTenant({
+    slug: s.slug("aaa"),
+    name: { en: "MultiTie-A", ar: "م-أ" },
+    parentId: parent.id,
+    position: 0,
+  });
+  const b = await seedCategoryInDevTenant({
+    slug: s.slug("bbb"),
+    name: { en: "MultiTie-B", ar: "م-ب" },
+    parentId: parent.id,
+    position: 0,
+  });
+  const c = await seedCategoryInDevTenant({
+    slug: s.slug("ccc"),
+    name: { en: "MultiTie-C", ar: "م-س" },
+    parentId: parent.id,
+    position: 0,
+  });
+  const d = await seedCategoryInDevTenant({
+    slug: s.slug("ddd"),
+    name: { en: "MultiTie-D", ar: "م-د" },
+    parentId: parent.id,
+    position: 0,
+  });
+
+  await signIn(page, "en", OWNER_EMAIL);
+  await page.goto(`/en/admin/categories`);
+  const visible = page
+    .locator('[data-testid="category-row"]:visible')
+    .filter({ hasText: s.prefix });
+  await expect(visible).toHaveCount(5, { timeout: 15_000 });
+
+  // Tap up on D — the last of the four tied siblings. Without the fix,
+  // D would jump past A, B, C in one tap. With the fix, it moves exactly
+  // one slot — to between C and the previous-to-C (i.e., third in the
+  // group: A, B, D, C).
+  const dUp = page.locator(
+    `[data-testid="category-move-up"][data-id="${d.id}"]:visible`,
+  );
+  await expect(dUp).toBeVisible();
+  await dUp.click();
+
+  // After: render order A, B, D, C. Positions should form gaps (stride
+  // 10 from the renumber pass).
+  await expect
+    .poll(async () => {
+      const positions = await readPositions([a.id, b.id, c.id, d.id]);
+      // Sort the four ids by their new position and assert the order.
+      const sorted = [a.id, b.id, c.id, d.id].sort((x, y) => {
+        return (positions.get(x) ?? 0) - (positions.get(y) ?? 0);
+      });
+      return sorted.join(",");
+    }, { timeout: 15_000 })
+    .toBe([a.id, b.id, d.id, c.id].join(","));
+
+  // Tap up on D again. After: A, D, B, C.
+  await dUp.click();
+  await expect
+    .poll(async () => {
+      const positions = await readPositions([a.id, b.id, c.id, d.id]);
+      const sorted = [a.id, b.id, c.id, d.id].sort((x, y) => {
+        return (positions.get(x) ?? 0) - (positions.get(y) ?? 0);
+      });
+      return sorted.join(",");
+    }, { timeout: 15_000 })
+    .toBe([a.id, d.id, b.id, c.id].join(","));
+});
+
 test("admin categories reorder — new categories created without explicit position land at the bottom of their parent group", async ({
   page,
 }) => {

@@ -1,44 +1,38 @@
 /**
- * `moveCategory` — sibling-swap reorder service (1a.4.2 follow-up).
+ * `moveCategory` — sibling reorder service (1a.4.2 follow-up).
  *
- * Replaces the leaky operator-facing "Position" form field. Owners now tap
- * an up/down arrow next to each row on the categories list; the service
- * swaps the row's `position` with that of its immediate sibling neighbour
- * (in the same parent group) in the requested direction.
+ * Replaces the leaky operator-facing "Position" form field. Owners tap an
+ * up/down arrow on the list page; the row moves exactly one slot within
+ * its parent group.
  *
  * Architectural decisions:
- *   1. **No OCC token.** The move is a closed, bounded operation: the
- *      operator's intent is "shuffle me one slot relative to my current
- *      neighbours", and that intent is re-evaluated against the *current*
- *      DB state on each click. An OCC mismatch error would be a worse UX
- *      than just performing the swap against the latest order.
+ *   1. **No OCC token.** Re-evaluating against current DB state on each
+ *      click is the right semantic; an OCC mismatch error would be hostile
+ *      UX for "shuffle me one slot."
  *   2. **Per-tenant advisory xact lock** (mirrors `updateCategory`)
  *      serializes concurrent moves so two opposite-direction swaps cannot
- *      race past each other's pre-checks. Cycle/depth invariants are
- *      *unchanged* by a sibling swap — only `position` columns move — so
- *      the lock is the only ordering primitive we need.
+ *      race past each other's pre-checks.
  *   3. **Sibling order** matches `listCategories`'s SQL ORDER BY for live
  *      rows under the same parent: `(position ASC, name->>'en' ASC,
- *      id ASC)`. Ties (legacy data has many rows at position=0) are
- *      broken deterministically by name then id, exactly as the list
+ *      id ASC)`. Ties are broken by name then id, exactly as the list
  *      page renders them.
- *   4. **Tie-break under equal `position`.** When the immediate neighbour
- *      shares this row's position, we don't shuffle the whole group — we
- *      simply set this row's position to `neighbour.position - 1` (move
- *      up) or `neighbour.position + 1` (move down). The neighbour stays
- *      put. This breaks the visual tie deterministically without a full
- *      sibling rebuild.
+ *   4. **Tied positions self-heal lazily.** Many legacy rows share
+ *      `position = 0` because nobody set one. Naive "set subject to
+ *      neighbour ± 1" leapfrogs the entire tied block in one tap.
+ *      Instead: if any two siblings in this parent group share a position,
+ *      renumber the whole live sibling group with stride 10 in current
+ *      render order, then swap subject and neighbour positions. Atomic
+ *      with the move, no migration, self-healing on first interaction
+ *      with each tied group. Stride 10 leaves room for future single-slot
+ *      moves without re-renumbering until the next tie cluster forms.
  *   5. **First-in-group up / last-in-group down → no-op (idempotent).**
- *      Service returns `before === after` and audit observes the no-op.
- *      Mirrors how `setProductCategories` happily accepts the current
- *      set as desired and writes a no-op audit row.
- *   6. **Soft-deleted rows are out-of-band.** Reordering operates on live
- *      siblings only. A soft-deleted row id → NOT_FOUND (same shape as
- *      `updateCategory`).
+ *   6. **Soft-deleted rows are out-of-band.** A soft-deleted row id →
+ *      NOT_FOUND (same shape as `updateCategory`).
  *
- * Audit `before` / `after` are the two affected rows' `(id, position)`
- * pairs sorted by id for determinism. Adapter (mutationProcedure /
- * MCP `auditMode:"mutation"`) handles the audit-write itself.
+ * Audit `before` / `after` carry every row whose position actually
+ * changed (just two when no ties; the renumbered group when ties got
+ * healed), sorted by id for determinism. The audit log reflects the
+ * actual data change.
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
@@ -179,59 +173,79 @@ export async function moveCategory(
 
   const neighbour = siblings[neighbourIdx]!;
 
-  // 4. Compute the new positions.
-  //    - When positions differ: straightforward swap.
-  //    - When positions are equal (legacy data, ties): move the subject
-  //      one slot past the neighbour without disturbing the neighbour.
-  //      `up` → neighbour.position - 1, `down` → neighbour.position + 1.
-  let subjectNewPos: number;
-  let neighbourNewPos: number;
-  if (subject.position !== neighbour.position) {
-    subjectNewPos = neighbour.position;
-    neighbourNewPos = subject.position;
+  // 4. Compute target positions for the whole sibling group.
+  //
+  //    Build the desired final render order (subject and neighbour
+  //    swapped). If any two siblings in the *current* group share a
+  //    position, renumber the whole final order at stride 10 — this
+  //    self-heals legacy ties so subsequent moves work in pure swap
+  //    mode. Otherwise plain swap (subject and neighbour exchange
+  //    positions; the rest of the group is untouched).
+  const finalOrder = [...siblings];
+  [finalOrder[subjectIdx], finalOrder[neighbourIdx]] = [
+    finalOrder[neighbourIdx]!,
+    finalOrder[subjectIdx]!,
+  ];
+
+  let hasTies = false;
+  for (let i = 0; i + 1 < siblings.length; i++) {
+    if (siblings[i]!.position === siblings[i + 1]!.position) {
+      hasTies = true;
+      break;
+    }
+  }
+
+  const STRIDE = 10;
+  const targetPositions = new Map<string, number>();
+  if (hasTies) {
+    finalOrder.forEach((row, i) => {
+      targetPositions.set(row.id, i * STRIDE);
+    });
   } else {
-    subjectNewPos =
-      parsed.direction === "up" ? neighbour.position - 1 : neighbour.position + 1;
-    neighbourNewPos = neighbour.position;
+    targetPositions.set(subject.id, neighbour.position);
+    targetPositions.set(neighbour.id, subject.position);
   }
 
-  // 5. Apply both updates inside the same tx. The advisory lock above
-  //    serializes concurrent reorders so we don't need OCC clauses on
-  //    these UPDATEs.
-  if (subjectNewPos !== subject.position) {
+  // 5. Compute the actual diff and apply UPDATEs only for rows whose
+  //    position changed. The advisory lock above serializes concurrent
+  //    reorders so we don't need OCC clauses on these UPDATEs.
+  interface Change {
+    id: string;
+    oldPosition: number;
+    newPosition: number;
+  }
+  const changes: Change[] = [];
+  for (const sib of siblings) {
+    const newPos = targetPositions.get(sib.id);
+    if (newPos !== undefined && newPos !== sib.position) {
+      changes.push({
+        id: sib.id,
+        oldPosition: sib.position,
+        newPosition: newPos,
+      });
+    }
+  }
+
+  for (const c of changes) {
     await tx
       .update(categories)
-      .set({ position: subjectNewPos, updatedAt: sql`now()` })
+      .set({ position: c.newPosition, updatedAt: sql`now()` })
       .where(
         and(
-          eq(categories.id, subject.id),
+          eq(categories.id, c.id),
           eq(categories.tenantId, tenant.id),
           isNull(categories.deletedAt),
         ),
       );
   }
-  if (neighbourNewPos !== neighbour.position) {
-    await tx
-      .update(categories)
-      .set({ position: neighbourNewPos, updatedAt: sql`now()` })
-      .where(
-        and(
-          eq(categories.id, neighbour.id),
-          eq(categories.tenantId, tenant.id),
-          isNull(categories.deletedAt),
-        ),
-      );
-  }
 
-  // 6. Audit payload. Sort by id for determinism.
-  const before: MoveCategorySnapshot[] = [
-    { id: subject.id, position: subject.position },
-    { id: neighbour.id, position: neighbour.position },
-  ].sort((a, b) => a.id.localeCompare(b.id));
-  const after: MoveCategorySnapshot[] = [
-    { id: subject.id, position: subjectNewPos },
-    { id: neighbour.id, position: neighbourNewPos },
-  ].sort((a, b) => a.id.localeCompare(b.id));
+  // 6. Audit payload — every row whose position changed, sorted by id.
+  const before: MoveCategorySnapshot[] = changes
+    .map((c) => ({ id: c.id, position: c.oldPosition }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const after: MoveCategorySnapshot[] = changes
+    .map((c) => ({ id: c.id, position: c.newPosition }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 
   return MoveCategoryResultSchema.parse({ before, after, noop: false });
 }
