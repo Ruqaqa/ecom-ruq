@@ -48,6 +48,9 @@ import { listProductsTool } from "./list-products";
 import { listCategoriesTool } from "./list-categories";
 import { createCategoryTool } from "./create-category";
 import { updateCategoryTool } from "./update-category";
+import { deleteCategoryTool } from "./delete-category";
+import { restoreCategoryTool } from "./restore-category";
+import { hardDeleteExpiredCategoriesTool } from "./hard-delete-expired-categories";
 import { setProductCategoriesTool } from "./set-product-categories";
 import { moveCategoryUpTool, moveCategoryDownTool } from "./move-category";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
@@ -119,6 +122,20 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   },
   {
     tool: updateCategoryTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // 1a.4.3 — soft-delete with cascade, single-row restore, owner-only
+  // recovery-window sweeper. All three require `confirm: true`.
+  {
+    tool: deleteCategoryTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: restoreCategoryTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: hardDeleteExpiredCategoriesTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
   // 1a.4.2 — set the categories on a product (set-replace semantics).

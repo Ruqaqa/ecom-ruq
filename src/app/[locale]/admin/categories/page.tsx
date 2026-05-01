@@ -42,6 +42,7 @@ import {
 } from "@/server/services/categories/list-categories";
 import { pickLocalizedName } from "@/lib/i18n/pick-localized-name";
 import { CategoryReorderButtons } from "./category-reorder-buttons";
+import { RestoreCategoryAction } from "./restore-category-action";
 
 export async function generateMetadata({
   params,
@@ -161,6 +162,19 @@ export default async function AdminCategoriesListPage({
         });
       });
     }
+  }
+
+  // For each REMOVED row, decide whether its immediate parent is still
+  // removed. The Restore button is disabled on a removed row whose
+  // parent is also still removed — the operator restores the parent
+  // first. Roots (parentId=null) cannot be parent-blocked.
+  const itemsById = new Map<string, (typeof page.items)[number]>();
+  for (const c of page.items) itemsById.set(c.id, c);
+  function parentIsRemoved(parentId: string | null): boolean {
+    if (parentId === null) return false;
+    const parent = itemsById.get(parentId);
+    if (!parent) return false;
+    return parent.deletedAt !== null;
   }
 
   return (
@@ -336,7 +350,16 @@ export default async function AdminCategoriesListPage({
                             showDown={flags.showDown}
                           />
                         </div>
-                      ) : null}
+                      ) : (
+                        <div className="border-t border-neutral-200 px-2 py-2 dark:border-neutral-800">
+                          <RestoreCategoryAction
+                            locale={locale}
+                            categoryId={c.id}
+                            displayName={displayName}
+                            parentRemoved={parentIsRemoved(c.parentId)}
+                          />
+                        </div>
+                      )}
                     </div>
                   </li>
                 );
@@ -417,6 +440,16 @@ export default async function AdminCategoriesListPage({
                                 relative: format.relativeTime(c.deletedAt),
                               })}
                             </span>
+                          ) : null}
+                          {isRemoved ? (
+                            <div className="mt-2">
+                              <RestoreCategoryAction
+                                locale={locale}
+                                categoryId={c.id}
+                                displayName={displayName}
+                                parentRemoved={parentIsRemoved(c.parentId)}
+                              />
+                            </div>
                           ) : null}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-neutral-600 dark:text-neutral-400">

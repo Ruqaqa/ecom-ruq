@@ -74,6 +74,10 @@ export default async function EditCategoryPage({
   let category: import("@/server/services/categories/create-category").Category | null = null;
   let categoryOptions: CategoryOption[] = [];
   let excludeIds: string[] = [];
+  // Live descendant count drives the cascade warning in the Remove
+  // confirm dialog. `excludeIds` already contains self + descendants;
+  // descendants are everything except the row itself.
+  let descendantCount = 0;
   let loadError = false;
   if (appDb) {
     const authedCtx = buildAuthedTenantContext(
@@ -91,6 +95,7 @@ export default async function EditCategoryPage({
       );
       categoryOptions = buildCategoryOptions(tree.items);
       excludeIds = collectSelfAndDescendantIds(tree.items, id);
+      descendantCount = Math.max(0, excludeIds.length - 1);
       category = tree.items.find((c) => c.id === id) ?? null;
     } catch {
       loadError = true;
@@ -157,6 +162,7 @@ export default async function EditCategoryPage({
             }}
             categoryOptions={categoryOptions}
             excludeIds={excludeIds}
+            descendantCount={descendantCount}
           />
         </div>
       </div>

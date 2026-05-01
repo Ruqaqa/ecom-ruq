@@ -34,10 +34,26 @@ import {
   ListForProductInputSchema,
 } from "@/server/services/categories/list-for-product";
 import { moveCategory } from "@/server/services/categories/move-category";
+import {
+  deleteCategory,
+  DeleteCategoryInputSchema,
+} from "@/server/services/categories/delete-category";
+import {
+  restoreCategory,
+  RestoreCategoryInputSchema,
+} from "@/server/services/categories/restore-category";
+import {
+  hardDeleteExpiredCategories,
+  HardDeleteExpiredCategoriesInputSchema,
+} from "@/server/services/categories/hard-delete-expired-categories";
 import { z } from "zod";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
-import { SlugTakenError, StaleWriteError } from "@/server/audit/error-codes";
+import {
+  RestoreWindowExpiredError,
+  SlugTakenError,
+  StaleWriteError,
+} from "@/server/audit/error-codes";
 
 export const categoriesRouter = router({
   list: publicProcedure
@@ -207,5 +223,121 @@ export const categoriesRouter = router({
         }
         throw err;
       }
+    }),
+
+  // 1a.4.3 — soft-delete with cascade. Wire envelope is small; audit
+  // payloads carry full Category snapshots so the append-only chain
+  // records the post-delete state and the cascadedIds blast radius.
+  delete: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(DeleteCategoryInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await deleteCategory(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = {
+          ...result.after,
+          cascadedIds: result.cascadedIds,
+        };
+        return {
+          id: result.after.id,
+          deletedAt: result.after.deletedAt,
+          cascadedIds: result.cascadedIds,
+        };
+      } catch (err) {
+        if (err instanceof StaleWriteError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "stale_write",
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  // 1a.4.3 — single-row restore. RestoreWindowExpiredError →
+  // BAD_REQUEST 'restore_expired' (precondition fail, not missing row).
+  // Slug collision on restore → CONFLICT 'slug_taken'.
+  // BAD_REQUEST 'parent_still_removed' flows through; the audit mapper
+  // classifies it as 'validation_failed'.
+  restore: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(RestoreCategoryInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await restoreCategory(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.after;
+        return {
+          id: result.after.id,
+          deletedAt: null as null,
+          updatedAt: result.after.updatedAt,
+        };
+      } catch (err) {
+        if (err instanceof RestoreWindowExpiredError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "restore_expired",
+            cause: err,
+          });
+        }
+        if (err instanceof SlugTakenError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "slug_taken",
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  // 1a.4.3 — recovery-window sweeper. Owner-only (NOT isWriteRole).
+  // Audit `after` is bounded to {count, ids} — slugs/dryRun never cross
+  // into the append-only chain (mirrors the products sweeper).
+  hardDeleteExpired: mutationProcedure
+    .use(requireRole({ roles: ["owner"] }))
+    .input(HardDeleteExpiredCategoriesInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      const result = await hardDeleteExpiredCategories(
+        ctx.tx,
+        { id: ctx.tenant.id },
+        role,
+        input,
+      );
+      ctx.auditPayloads.after = { count: result.count, ids: result.ids };
+      return result;
     }),
 });

@@ -182,6 +182,20 @@
         "moveUpAriaLabel": "Move {name} up",
         "moveDownAriaLabel": "Move {name} down",
         "moveError": "Could not reorder. Try again.",
+        "restoreCta": "Restore",
+        "restoreDisabledHelp": "Restore the parent first.",
+        "restoreDialog": {
+          "heading": "Restore {name}?",
+          "body": "It will be visible again to staff and reappear in category pickers. Products that were linked to it before removal will be visible under it again.",
+          "confirm": "Restore",
+          "cancel": "Cancel"
+        },
+        "restoreError": {
+          "windowExpired": "This category can no longer be restored. The 30-day window has passed.",
+          "parentStillRemoved": "The parent category is still removed. Restore the parent first, then restore this one.",
+          "slugTaken": "Another category took this address while this one was removed. Open this category to choose a different address.",
+          "depthExceeded": "Restoring this would exceed the 3-level limit. The category tree changed while it was removed."
+        },
         "columns": {
           "name": "Name",
           "slug": "Slug",
@@ -245,7 +259,16 @@
         "slugTaken": "That slug is already used by another category.",
         "parentNotFound": "The parent you chose is no longer available. Pick another parent.",
         "depthExceeded": "Moving this category here would exceed the 3-level limit.",
-        "categoryCycle": "A category cannot be its own ancestor."
+        "categoryCycle": "A category cannot be its own ancestor.",
+        "removeCta": "Remove category",
+        "removeDialog": {
+          "heading": "Remove {name}?",
+          "body": "This category will be hidden from the storefront and from category pickers. You have 30 days to restore it. After 30 days it will be permanently deleted.",
+          "cascadeWarning": "{count, plural, one {This will also remove # sub-category beneath it.} other {This will also remove # sub-categories beneath it.}}",
+          "productsNote": "Any products linked to these categories will lose those tags until the categories are restored.",
+          "confirm": "Remove",
+          "cancel": "Cancel"
+        }
       }
     },
     "tokens": {
