@@ -374,16 +374,16 @@ export default async function AdminCategoriesListPage({
               >
                 <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400">
                   <tr>
-                    <th scope="col" className="px-4 py-3 text-start">
+                    <th scope="col" className="px-6 py-3 text-start">
                       {t("columns.name")}
                     </th>
-                    <th scope="col" className="px-4 py-3 text-start">
+                    <th scope="col" className="px-6 py-3 text-start">
                       {t("columns.slug")}
                     </th>
-                    <th scope="col" className="px-4 py-3 text-start">
+                    <th scope="col" className="px-6 py-3 text-start">
                       {t("columns.updated")}
                     </th>
-                    <th scope="col" className="px-4 py-3 text-start">
+                    <th scope="col" className="px-6 py-3 text-start">
                       {t("columns.order")}
                     </th>
                   </tr>
@@ -395,10 +395,10 @@ export default async function AdminCategoriesListPage({
                     const isRemoved = c.deletedAt !== null;
                     const indent =
                       c.depth === 3
-                        ? "ps-12"
+                        ? "ps-[4.5rem]"
                         : c.depth === 2
-                          ? "ps-6"
-                          : "ps-0";
+                          ? "ps-12"
+                          : "";
                     const flags = reorderFlags.get(c.id) ?? {
                       showUp: false,
                       showDown: false,
@@ -414,7 +414,7 @@ export default async function AdminCategoriesListPage({
                           isRemoved ? "bg-neutral-50 dark:bg-neutral-900/40" : ""
                         }
                       >
-                        <td className={`px-4 py-3 ${indent}`}>
+                        <td className={`px-6 py-3 ${indent}`}>
                           <Link
                             href={`/${rawLocale}/admin/categories/${c.id}`}
                             data-testid="category-row-link"
@@ -452,13 +452,13 @@ export default async function AdminCategoriesListPage({
                             </div>
                           ) : null}
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs text-neutral-600 dark:text-neutral-400">
+                        <td className="px-6 py-3 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                           <span className="block truncate">{c.slug}</span>
                         </td>
-                        <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                        <td className="px-6 py-3 text-neutral-600 dark:text-neutral-400">
                           {format.dateTime(c.updatedAt, dateOptions)}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-3">
                           {!isRemoved ? (
                             <CategoryReorderButtons
                               categoryId={c.id}

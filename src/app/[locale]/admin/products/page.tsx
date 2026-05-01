@@ -320,10 +320,10 @@ export default async function AdminProductsListPage({
               >
                 <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400">
                   <tr>
-                    <th scope="col" className="px-4 py-3 text-start">{t("columns.name")}</th>
-                    <th scope="col" className="px-4 py-3 text-start">{t("columns.status")}</th>
-                    <th scope="col" className="px-4 py-3 text-start">{t("columns.slug")}</th>
-                    <th scope="col" className="px-4 py-3 text-start">{t("columns.updated")}</th>
+                    <th scope="col" className="px-6 py-3 text-start">{t("columns.name")}</th>
+                    <th scope="col" className="px-6 py-3 text-start">{t("columns.status")}</th>
+                    <th scope="col" className="px-6 py-3 text-start">{t("columns.slug")}</th>
+                    <th scope="col" className="px-6 py-3 text-start">{t("columns.updated")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
@@ -340,7 +340,7 @@ export default async function AdminProductsListPage({
                           isRemoved ? "bg-neutral-50 dark:bg-neutral-900/40" : ""
                         }
                       >
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-3">
                           <Link
                             href={`/${rawLocale}/admin/products/${p.id}`}
                             data-testid="product-row-link"
@@ -377,7 +377,7 @@ export default async function AdminProductsListPage({
                             </div>
                           ) : null}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-3">
                           <StatusPill
                             status={p.status}
                             isRemoved={isRemoved}
@@ -388,10 +388,10 @@ export default async function AdminProductsListPage({
                             }}
                           />
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs text-neutral-600 dark:text-neutral-400">
+                        <td className="px-6 py-3 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                           <span className="block truncate">{p.slug}</span>
                         </td>
-                        <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                        <td className="px-6 py-3 text-neutral-600 dark:text-neutral-400">
                           {format.dateTime(p.updatedAt, dateOptions)}
                         </td>
                       </tr>
