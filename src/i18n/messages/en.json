@@ -229,7 +229,7 @@
           "consecutive_hyphens": "Slug cannot contain two hyphens in a row."
         },
         "parent": "Parent category",
-        "parentTopLevel": "(top-level)",
+        "parentTopLevel": "No parent",
         "parentChange": "Change parent",
         "parentHelper": "Pick a parent to nest this category under, or leave it as a top-level category.",
         "submit": "Create category",

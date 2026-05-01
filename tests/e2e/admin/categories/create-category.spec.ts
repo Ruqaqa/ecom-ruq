@@ -253,9 +253,9 @@ test("admin create category — picker Cancel is a true no-op", async ({
   await signIn(page, "en", OWNER_EMAIL);
   await page.goto(`/en/admin/categories/new`);
 
-  // Initial display is "(top-level)".
+  // Initial display is the i18n placeholder for "no parent selected".
   const display = page.getByTestId("category-parent-display");
-  await expect(display).toHaveText("(top-level)");
+  await expect(display).toHaveText("No parent");
 
   // Open picker, click a row, then Cancel — display unchanged.
   await page.getByTestId("category-parent-trigger").click();
@@ -266,7 +266,7 @@ test("admin create category — picker Cancel is a true no-op", async ({
   await rootRow.locator('[data-testid="category-picker-radio"]').check();
   await page.getByTestId("category-picker-cancel").click();
   await expect(page.getByTestId("category-picker-sheet")).toHaveCount(0);
-  await expect(display).toHaveText("(top-level)");
+  await expect(display).toHaveText("No parent");
 });
 
 test("admin create category — Escape closes picker; backdrop closes picker", async ({
