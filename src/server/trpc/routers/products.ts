@@ -70,10 +70,23 @@ import {
   setProductCategories,
   SetProductCategoriesInputSchema,
 } from "@/server/services/products/set-product-categories";
+import {
+  setProductOptions,
+  SetProductOptionsInputSchema,
+} from "@/server/services/variants/set-product-options";
+import {
+  setProductVariants,
+  SetProductVariantsInputSchema,
+} from "@/server/services/variants/set-product-variants";
+import {
+  getProductWithVariants,
+  GetProductWithVariantsInputSchema,
+} from "@/server/services/variants/get-product-with-variants";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext } from "@/server/tenant/context";
 import {
   RestoreWindowExpiredError,
+  SkuTakenError,
   SlugTakenError,
   StaleWriteError,
 } from "@/server/audit/error-codes";
@@ -318,6 +331,112 @@ export const productsRouter = router({
         // BAD_REQUEST `category_not_found` and NOT_FOUND
         // `product_not_found` flow through; mapErrorToAuditCode classifies
         // them as `validation_failed` and `not_found` respectively.
+        throw err;
+      }
+    }),
+
+  // 1a.5.1 — admin product+options+variants composite read for the
+  // edit page. Owner sees costPriceMinor; staff does not (Tier-B).
+  getWithVariants: publicProcedure
+    .use(requireRole({ roles: ["owner", "staff"], identity: "any" }))
+    .input(GetProductWithVariantsInputSchema)
+    .query(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      if (!appDb) return null;
+      const { userId } = ctx.identity;
+      const tokenId =
+        ctx.identity.type === "bearer" ? ctx.identity.tokenId : null;
+      const authedCtx = buildAuthedTenantContext(
+        { id: ctx.tenant.id },
+        { userId, actorType: "user", tokenId, role },
+      );
+      return withTenant(appDb, authedCtx, (tx) =>
+        getProductWithVariants(tx, { id: ctx.tenant.id }, role, input),
+      );
+    }),
+
+  // 1a.5.1 — set option types + values on a product (set-replace).
+  // OCC anchored on the product row; non-destructive at this layer
+  // (option REMOVAL is rejected — that's the 1a.5.3 cascade flow).
+  // Audit `before`/`after` are bounded snapshots (spec §7).
+  setOptions: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(SetProductOptionsInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await setProductOptions(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.after;
+        return result;
+      } catch (err) {
+        if (err instanceof StaleWriteError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "stale_write",
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  // 1a.5.1 — set variant rows on a product (set-replace, hard-delete
+  // on diff-removal). OCC anchored on the product row. SKU collisions
+  // become CONFLICT `sku_taken`; the offending SKU is never echoed.
+  setVariants: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(SetProductVariantsInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await setProductVariants(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.after;
+        return result;
+      } catch (err) {
+        if (err instanceof StaleWriteError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "stale_write",
+            cause: err,
+          });
+        }
+        if (err instanceof SkuTakenError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "sku_taken",
+            cause: err,
+          });
+        }
         throw err;
       }
     }),

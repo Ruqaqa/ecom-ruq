@@ -70,3 +70,22 @@ export class RestoreWindowExpiredError extends Error {
     this.name = "RestoreWindowExpiredError";
   }
 }
+
+/**
+ * Thrown by `setProductVariants` when a SKU uniqueness violation surfaces
+ * from pg 23505 on `product_variants_tenant_sku_unique`. Mirrors
+ * `SlugTakenError` shape: domain-typed, no PII, audit-mapper recognizes
+ * via instanceof (and via TRPCError `.cause` after transport translation)
+ * → audit code 'conflict'. Wire message stays the closed-set string
+ * 'sku_taken'; the offending SKU is NEVER interpolated (an SKU collision
+ * with another tenant's product would otherwise be a cross-tenant
+ * existence-leak oracle).
+ */
+export class SkuTakenError extends Error {
+  public readonly skuTaken = true as const;
+  constructor(cause?: unknown) {
+    super("sku_taken");
+    this.name = "SkuTakenError";
+    if (cause !== undefined) (this as Error & { cause?: unknown }).cause = cause;
+  }
+}

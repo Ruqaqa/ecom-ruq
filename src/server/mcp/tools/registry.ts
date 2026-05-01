@@ -52,6 +52,8 @@ import { deleteCategoryTool } from "./delete-category";
 import { restoreCategoryTool } from "./restore-category";
 import { hardDeleteExpiredCategoriesTool } from "./hard-delete-expired-categories";
 import { setProductCategoriesTool } from "./set-product-categories";
+import { setProductOptionsTool } from "./set-product-options";
+import { setProductVariantsTool } from "./set-product-variants";
 import { moveCategoryUpTool, moveCategoryDownTool } from "./move-category";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
@@ -141,6 +143,18 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   // 1a.4.2 — set the categories on a product (set-replace semantics).
   {
     tool: setProductCategoriesTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // 1a.5.1 — variants. Set-replace at the product level for both
+  // option types and variant rows. Audit `before`/`after` are bounded
+  // snapshots (spec §7) so localized name/value never crosses into the
+  // append-only audit chain.
+  {
+    tool: setProductOptionsTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: setProductVariantsTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
   // 1a.4.2 follow-up — sibling-swap reorder (replaces the leaky

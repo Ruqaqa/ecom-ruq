@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, index, uniqueIndex, unique, primaryKey, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, index, uniqueIndex, unique, primaryKey, foreignKey, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { LocalizedText, LocalizedTextPartial } from "@/lib/i18n/localized";
 import { tenants } from "./tenants";
@@ -119,13 +119,24 @@ export const productOptions = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
+    // Composite same-tenant FK on (tenant_id, product_id) declared
+    // in the table-options block below; this column carries no
+    // single-column FK because migration 0011 dropped the original.
+    productId: uuid("product_id").notNull(),
     name: jsonb("name").$type<LocalizedText>().notNull(),
     position: integer("position").notNull().default(0),
   },
-  (t) => [index("product_options_product_id_idx").on(t.productId)],
+  (t) => [
+    index("product_options_product_id_idx").on(t.productId),
+    // Anchors the composite FK from product_option_values so a value
+    // must live in the same tenant as its option.
+    unique("product_options_tenant_id_id_unique").on(t.tenantId, t.id),
+    foreignKey({
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+      name: "product_options_product_same_tenant_fk",
+    }).onDelete("cascade"),
+  ],
 );
 
 export const productOptionValues = pgTable(
@@ -135,13 +146,22 @@ export const productOptionValues = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    optionId: uuid("option_id")
-      .notNull()
-      .references(() => productOptions.id, { onDelete: "cascade" }),
+    // Composite same-tenant FK on (tenant_id, option_id) declared in
+    // the table-options block below; the original single-column FK
+    // was dropped in migration 0011.
+    optionId: uuid("option_id").notNull(),
     value: jsonb("value").$type<LocalizedText>().notNull(),
     position: integer("position").notNull().default(0),
   },
-  (t) => [index("product_option_values_option_id_idx").on(t.optionId)],
+  (t) => [
+    index("product_option_values_option_id_idx").on(t.optionId),
+    unique("product_option_values_tenant_id_id_unique").on(t.tenantId, t.id),
+    foreignKey({
+      columns: [t.tenantId, t.optionId],
+      foreignColumns: [productOptions.tenantId, productOptions.id],
+      name: "product_option_values_option_same_tenant_fk",
+    }).onDelete("cascade"),
+  ],
 );
 
 export const productVariants = pgTable(
@@ -151,9 +171,10 @@ export const productVariants = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
+    // Composite same-tenant FK on (tenant_id, product_id) declared in
+    // the table-options block below; the original single-column FK
+    // was dropped in migration 0011.
+    productId: uuid("product_id").notNull(),
     sku: text("sku").notNull(),
     priceMinor: integer("price_minor").notNull(),
     currency: text("currency").notNull().default("SAR"),
@@ -166,5 +187,16 @@ export const productVariants = pgTable(
   (t) => [
     index("product_variants_product_id_idx").on(t.productId),
     uniqueIndex("product_variants_tenant_sku_unique").on(t.tenantId, t.sku),
+    foreignKey({
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+      name: "product_variants_product_same_tenant_fk",
+    }).onDelete("cascade"),
+    // Defense-in-depth on the JSONB array length cap. The Zod schema
+    // is the primary cap; this is the matching belt at the data layer.
+    check(
+      "product_variants_option_value_ids_max_3",
+      sql`jsonb_typeof(${t.optionValueIds}) = 'array' AND jsonb_array_length(${t.optionValueIds}) <= 3`,
+    ),
   ],
 );
