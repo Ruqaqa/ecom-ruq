@@ -9,6 +9,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -110,30 +111,35 @@ export function EditProductForm({
   // unrelated form chrome. Move-focus contract: after a chip's × is
   // pressed and the chip unmounts, focus lands on the next chip's ×
   // (DOM order) if one exists, otherwise on the Add Categories button.
-  // requestAnimationFrame is the right pin: by the next paint, React
-  // has reconciled the new chip set into the DOM.
+  //
+  // `flushSync` forces React to commit the state update + DOM patch
+  // synchronously inside this handler. Without it, an earlier
+  // `requestAnimationFrame` trampoline raced React 18's concurrent
+  // reconciler on mobile WebKit / chrome-headless-shell — the chip
+  // being removed was still in the DOM when the rAF callback ran, so
+  // focus shifted to a node that was about to unmount and
+  // `document.activeElement` collapsed to null.
   const categoriesSectionRef = useRef<HTMLElement | null>(null);
 
   function onRemoveChip(removedId: string, removedIndex: number): void {
-    setSelectedCategoryIds((prev) => prev.filter((x) => x !== removedId));
-    // After the next paint, find a focus target inside the section.
-    requestAnimationFrame(() => {
-      const root = categoriesSectionRef.current;
-      if (!root) return;
-      const remaining = Array.from(
-        root.querySelectorAll<HTMLButtonElement>(
-          '[data-testid="product-category-chip-remove"]',
-        ),
-      );
-      // Prefer the chip that took the removed chip's slot. If we
-      // removed the last chip, fall back one index. If no chips
-      // remain, fall back to the Add button.
-      const target =
-        remaining[removedIndex] ??
-        remaining[remaining.length - 1] ??
-        document.getElementById("product-categories-add");
-      target?.focus();
+    flushSync(() => {
+      setSelectedCategoryIds((prev) => prev.filter((x) => x !== removedId));
     });
+    const root = categoriesSectionRef.current;
+    if (!root) return;
+    const remaining = Array.from(
+      root.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="product-category-chip-remove"]',
+      ),
+    );
+    // Prefer the chip that took the removed chip's slot. If we
+    // removed the last chip, fall back one index. If no chips
+    // remain, fall back to the Add button.
+    const target =
+      remaining[removedIndex] ??
+      remaining[remaining.length - 1] ??
+      document.getElementById("product-categories-add");
+    target?.focus();
   }
 
   // Baseline-key — derived from the live `baselineCategoryIds` (NOT the
