@@ -29,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Deferred to post-revenue** (see `prd.md` §4 "Deferred"): `pgvector`, Voyage AI embeddings, and the customer-facing AI bot. Do not pull them into Phase 1 work. The owner's admin workflow is **not** deferred — but it lives entirely outside the app, in MCP clients (Claude Desktop / Claude Code) talking to the platform's MCP server. No in-app admin chat page is ever built.
 
-**Resume guidance.** `pnpm install` + `pnpm services:up` brings the local stack up; `pnpm dev` serves at `http://localhost:5001`. All commands in the table below work today. The memory index at `~/.claude/projects/-Users-bassel-development-ecom-ruq/memory/MEMORY.md` has project-specific context (ports, deferred scope, user background, team workflow lessons) — read it before starting a chunk. For any architectural details about Phase 0 surface area (auth, audit, tenancy, RLS, MCP, PATs, encryption), read the relevant runbook in `docs/runbooks/` and ADRs in `docs/adr/` rather than guessing.
+**Resume guidance.** From a fresh checkout: `pnpm install` then `pnpm dev:setup` (brings up the Docker stack with healthcheck wait, runs migrations, seeds the dev tenant, seeds the admin/staff/customer fixtures). After that, `pnpm dev` serves at `http://localhost:5001`. On a machine that's already set up, `pnpm services:up` + `pnpm dev` is enough. All commands in the table below work today. The memory index at `~/.claude/projects/-Users-bassel-development-ecom-ruq/memory/MEMORY.md` has project-specific context (ports, deferred scope, user background, team workflow lessons) — read it before starting a chunk. For any architectural details about Phase 0 surface area (auth, audit, tenancy, RLS, MCP, PATs, encryption), read the relevant runbook in `docs/runbooks/` and ADRs in `docs/adr/` rather than guessing.
 
 ---
 
@@ -39,6 +39,7 @@ All of these work today. They are the definition of done (see Section 1):
 
 | Command | Purpose |
 |---|---|
+| `pnpm dev:setup` | One-shot fresh-machine setup: services up + migrations + seed dev tenant + seed admin fixtures |
 | `pnpm dev` | Local development server |
 | `pnpm test` | Vitest unit and integration tests |
 | `pnpm test:e2e` | Playwright end-to-end tests (mobile viewport, both locales) |
