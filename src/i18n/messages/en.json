@@ -146,6 +146,40 @@
           "noneSelected": "No categories yet. Tap Add to choose some.",
           "chipRemoveAriaLabel": "Remove {path}",
           "staleError": "One or more selected categories are no longer available. Please review your selections."
+        },
+        "options": {
+          "heading": "Options",
+          "helperEmpty": "Add up to 3 option types to create variants. Skip if this product comes in only one version.",
+          "addOptionType": "Add an option type",
+          "addOptionValue": "Add a value",
+          "capCounter": "{count} / 3 option types",
+          "capReachedHelp": "Maximum 3 option types per product. Combine into one option (e.g. \"Colour & Size\").",
+          "nameEnLabel": "Name (English)",
+          "nameArLabel": "Name (Arabic)",
+          "valueEnLabel": "Value (English)",
+          "valueArLabel": "Value (Arabic)",
+          "valuesLabel": "Values",
+          "valueRemoveAriaLabel": "Remove value",
+          "removeOptionCta": "Remove",
+          "removeOptionDisabledHelp": "Remove will be available once you can review which variants it affects.",
+          "validationRequired": "Both English and Arabic are required."
+        },
+        "variants": {
+          "headingSingle": "Variant",
+          "headingMulti": "Variants",
+          "helperFlat": "This product has one version.",
+          "capCounter": "{count} / 100 variants",
+          "skuLabel": "SKU",
+          "priceLabel": "Price",
+          "stockLabel": "Stock",
+          "currencyAffix": "SAR",
+          "stockAffix": "pcs",
+          "skuRequired": "SKU is required.",
+          "skuTaken": "This SKU is already used by another variant.",
+          "priceInvalid": "Must be 0 or more.",
+          "stockInvalid": "Must be 0 or more.",
+          "duplicateCombination": "This combination is already used by another variant.",
+          "saveError": "Could not save variants. Please check your inputs."
         }
       }
     },

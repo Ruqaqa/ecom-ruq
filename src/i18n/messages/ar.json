@@ -146,6 +146,40 @@
           "noneSelected": "لا توجد فئات بعد. اضغط إضافة لاختيار فئات.",
           "chipRemoveAriaLabel": "إزالة {path}",
           "staleError": "بعض الفئات المختارة لم تعد متاحة. راجع اختياراتك."
+        },
+        "options": {
+          "heading": "الخيارات",
+          "helperEmpty": "أضف حتى ٣ أنواع خيارات لإنشاء تنويعات. تجاوز هذه الخطوة إذا كان المنتج بنسخة واحدة فقط.",
+          "addOptionType": "أضف نوع خيار",
+          "addOptionValue": "أضف قيمة",
+          "capCounter": "{count} / ٣ أنواع خيارات",
+          "capReachedHelp": "حدّ أقصى ٣ أنواع خيارات لكل منتج. ادمج الأنواع في خيار واحد (مثل \"اللون والمقاس\").",
+          "nameEnLabel": "الاسم (الإنجليزية)",
+          "nameArLabel": "الاسم (العربية)",
+          "valueEnLabel": "القيمة (الإنجليزية)",
+          "valueArLabel": "القيمة (العربية)",
+          "valuesLabel": "القيم",
+          "valueRemoveAriaLabel": "إزالة القيمة",
+          "removeOptionCta": "إزالة",
+          "removeOptionDisabledHelp": "ستتاح إزالة هذا النوع بعد أن تتمكن من مراجعة التنويعات المتأثرة.",
+          "validationRequired": "كلٌّ من العربية والإنجليزية مطلوب."
+        },
+        "variants": {
+          "headingSingle": "التنويعة",
+          "headingMulti": "التنويعات",
+          "helperFlat": "هذا المنتج بنسخة واحدة.",
+          "capCounter": "{count} / ١٠٠ تنويعة",
+          "skuLabel": "رمز SKU",
+          "priceLabel": "السعر",
+          "stockLabel": "المخزون",
+          "currencyAffix": "ر.س",
+          "stockAffix": "قطعة",
+          "skuRequired": "رمز SKU مطلوب.",
+          "skuTaken": "رمز SKU هذا مستخدم لتنويعة أخرى.",
+          "priceInvalid": "يجب أن يكون صفرًا أو أكثر.",
+          "stockInvalid": "يجب أن يكون صفرًا أو أكثر.",
+          "duplicateCombination": "هذه التركيبة مستخدمة في تنويعة أخرى.",
+          "saveError": "تعذّر حفظ التنويعات. تحقّق من المدخلات."
         }
       }
     },

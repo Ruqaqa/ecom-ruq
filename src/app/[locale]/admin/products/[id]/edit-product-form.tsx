@@ -22,6 +22,14 @@ import {
 } from "@/lib/product-slug";
 import type { CategoryOption } from "@/lib/categories/build-category-options";
 import { CategoryPickerSheet } from "@/components/admin/category-picker-sheet";
+import {
+  buildVariantRows,
+  type EditorOption,
+  type EditorVariant,
+  type VariantRow,
+} from "@/lib/variants/build-variant-rows";
+import { OptionsPanel } from "./options-panel";
+import { VariantsList, type RowErrors } from "./variants-list";
 
 interface InitialValues {
   id: string;
@@ -40,6 +48,13 @@ interface Props {
   initial: InitialValues;
   categoryOptions: ReadonlyArray<CategoryOption>;
   initialCategoryIds: ReadonlyArray<string>;
+  initialOptions: ReadonlyArray<EditorOption>;
+  initialVariants: ReadonlyArray<EditorVariant>;
+}
+
+/** Mint a runtime client id for a fresh option/value (server replaces on save). */
+function clientId(): string {
+  return crypto.randomUUID();
 }
 
 type FieldErrors = Record<string, string[] | undefined>;
@@ -49,6 +64,8 @@ export function EditProductForm({
   initial,
   categoryOptions,
   initialCategoryIds,
+  initialOptions,
+  initialVariants,
 }: Props) {
   const t = useTranslations("admin.products.edit");
   const tc = useTranslations("admin.products.create");
@@ -99,6 +116,235 @@ export function EditProductForm({
   const [liveExpectedUpdatedAt, setLiveExpectedUpdatedAt] = useState<string>(
     initial.expectedUpdatedAt,
   );
+
+  // Options + variants (chunk 1a.5.2). Persisted ids are tracked so
+  // 1a.5.1's `setProductOptions` rejection of REMOVE-via-set-replace
+  // doesn't accidentally fire — the Remove affordance is disabled in
+  // 1a.5.2 (1a.5.3 wires the cascade), but we keep the persisted-id set
+  // ready for future use.
+  const persistedOptionIds = useMemo(
+    () => new Set<string>(initialOptions.map((o) => o.id)),
+    [initialOptions],
+  );
+  const initialOptionsKey = useMemo(
+    () => snapshotOptions(initialOptions),
+    [initialOptions],
+  );
+  const initialVariantsKey = useMemo(
+    () => snapshotVariants(initialVariants),
+    [initialVariants],
+  );
+  const [optionsState, setOptionsState] = useState<EditorOption[]>(() =>
+    initialOptions.map((o) => ({
+      id: o.id,
+      name: { en: o.name.en, ar: o.name.ar },
+      position: o.position,
+      values: o.values.map((v) => ({
+        id: v.id,
+        value: { en: v.value.en, ar: v.value.ar },
+        position: v.position,
+      })),
+    })),
+  );
+  const [variantState, setVariantState] = useState<Map<string, VariantRow>>(
+    () => {
+      // Hydrate the per-key edit state from the cartesian generator,
+      // pre-filled by `buildVariantRows` from the server's variant rows.
+      const rows = buildVariantRows(initialOptions, initialVariants);
+      return new Map(rows.map((r) => [r.key, r]));
+    },
+  );
+  const [variantRowErrors, setVariantRowErrors] = useState<
+    Record<string, RowErrors | undefined>
+  >({});
+  const [variantsTopError, setVariantsTopError] = useState<string | null>(null);
+
+  // Materialise the rows the variants list renders by combining the
+  // current options state with the per-key edit map. This is the same
+  // function tested in `tests/unit/lib/variants/build-variant-rows.test.ts`,
+  // so any divergence between the form and the back-office shape is
+  // caught at unit-test level.
+  const variantRows: VariantRow[] = useMemo(() => {
+    const generated = buildVariantRows(
+      optionsState,
+      // For pre-existing rows we want their persisted SKU/price/stock
+      // to flow into the generator's `existing` arg. We recover that
+      // from `variantState` by tuple lookup.
+      [...variantState.values()].map<EditorVariant>((r) => ({
+        id: r.id,
+        sku: r.sku,
+        priceMinor: r.priceMinor ?? 0,
+        currency: r.currency,
+        stock: r.stock ?? 0,
+        active: r.active,
+        optionValueIds: r.tuple,
+      })),
+    );
+    // Merge the per-key live edit state on top — the user might have
+    // typed a new SKU that hasn't been written back to existingMap yet.
+    return generated.map((r) => {
+      const live = variantState.get(r.key);
+      return live
+        ? {
+            ...r,
+            sku: live.sku,
+            priceMinor: live.priceMinor,
+            stock: live.stock,
+            active: live.active,
+            id: live.id ?? r.id,
+          }
+        : r;
+    });
+    // `variantState` is a Map identity; React reuses it across renders
+    // so we depend on the JSON snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optionsState, variantStateSnapshot(variantState)]);
+
+  function updateVariantRow(key: string, next: Partial<VariantRow>): void {
+    setVariantState((prev) => {
+      const live =
+        prev.get(key) ??
+        variantRows.find((r) => r.key === key) ??
+        emptyRowForKey(key);
+      const merged: VariantRow = { ...live, ...next };
+      const m = new Map(prev);
+      m.set(key, merged);
+      return m;
+    });
+    setVariantRowErrors((prev) => {
+      // Clear only the touched row's error so other rows keep their
+      // validation state until they're touched too.
+      const cur = prev[key];
+      if (!cur) return prev;
+      const cleared: RowErrors = {};
+      if (cur.combination) cleared.combination = cur.combination;
+      const next = { ...prev };
+      next[key] = Object.keys(cleared).length === 0 ? undefined : cleared;
+      return next;
+    });
+  }
+
+  const optionsHandlers = useMemo(
+    () => ({
+      onAddOption: () =>
+        setOptionsState((prev) =>
+          prev.length >= 3
+            ? prev
+            : [
+                ...prev,
+                {
+                  id: clientId(),
+                  name: { en: "", ar: "" },
+                  position: prev.length + 1,
+                  values: [],
+                },
+              ],
+        ),
+      onUpdateOption: (
+        optionId: string,
+        next: { name?: { en?: string; ar?: string } },
+      ) =>
+        setOptionsState((prev) =>
+          prev.map((o) =>
+            o.id !== optionId
+              ? o
+              : {
+                  ...o,
+                  name: {
+                    en: next.name?.en ?? o.name.en,
+                    ar: next.name?.ar ?? o.name.ar,
+                  },
+                },
+          ),
+        ),
+      onAddValue: (optionId: string) =>
+        setOptionsState((prev) =>
+          prev.map((o) =>
+            o.id !== optionId
+              ? o
+              : {
+                  ...o,
+                  values: [
+                    ...o.values,
+                    {
+                      id: clientId(),
+                      value: { en: "", ar: "" },
+                      position: o.values.length + 1,
+                    },
+                  ],
+                },
+          ),
+        ),
+      onUpdateValue: (
+        optionId: string,
+        valueId: string,
+        next: { value?: { en?: string; ar?: string } },
+      ) =>
+        setOptionsState((prev) =>
+          prev.map((o) =>
+            o.id !== optionId
+              ? o
+              : {
+                  ...o,
+                  values: o.values.map((v) =>
+                    v.id !== valueId
+                      ? v
+                      : {
+                          ...v,
+                          value: {
+                            en: next.value?.en ?? v.value.en,
+                            ar: next.value?.ar ?? v.value.ar,
+                          },
+                        },
+                  ),
+                },
+          ),
+        ),
+      onRemoveValue: (optionId: string, valueId: string) =>
+        setOptionsState((prev) =>
+          prev.map((o) =>
+            o.id !== optionId
+              ? o
+              : {
+                  ...o,
+                  values: o.values.filter((v) => v.id !== valueId),
+                },
+          ),
+        ),
+    }),
+    [],
+  );
+
+  const optionsDirty = useMemo(
+    () => snapshotOptions(optionsState) !== initialOptionsKey,
+    [optionsState, initialOptionsKey],
+  );
+  const variantsDirty = useMemo(() => {
+    // Filter out auto-generated rows the operator hasn't touched. An
+    // untouched row is one with no persisted id, an empty SKU, and
+    // both price + stock at null (i.e., the row was synthesised by
+    // the cartesian generator and the operator hasn't typed anything
+    // into it). This keeps the dirty memo from flagging a freshly-
+    // opened form as dirty just because the cartesian generator
+    // emitted a blank default row.
+    const operatorTouched = variantRows.filter(
+      (r) =>
+        r.id !== undefined ||
+        r.sku.length > 0 ||
+        r.priceMinor !== null ||
+        r.stock !== null,
+    );
+    const editorVariants: EditorVariant[] = operatorTouched.map((r) => ({
+      id: r.id,
+      sku: r.sku,
+      priceMinor: r.priceMinor ?? 0,
+      currency: r.currency,
+      stock: r.stock ?? 0,
+      active: r.active,
+      optionValueIds: r.tuple,
+    }));
+    return snapshotVariants(editorVariants) !== initialVariantsKey;
+  }, [variantRows, initialVariantsKey]);
 
   const categoryOptionsById = useMemo(() => {
     const m = new Map<string, CategoryOption>();
@@ -172,6 +418,8 @@ export function EditProductForm({
     if (initialHasCostPrice && costPriceText !== initialCostPriceText) return true;
     // Compare sorted-string keys for set semantics.
     if (selectedCategoryIdsKey !== baselineCategoryIdsKey) return true;
+    if (optionsDirty) return true;
+    if (variantsDirty) return true;
     return false;
   }, [
     slug,
@@ -186,6 +434,8 @@ export function EditProductForm({
     initialCostPriceText,
     selectedCategoryIdsKey,
     baselineCategoryIdsKey,
+    optionsDirty,
+    variantsDirty,
   ]);
 
   // Browser back / tab close confirmation.
@@ -234,23 +484,42 @@ export function EditProductForm({
     },
   });
 
-  // setCategories is the second leg of the two-mutation save flow. On
-  // success it redirects to the list. On stale-category (BAD_REQUEST
+  // setCategories is the second leg of the save chain. On success it
+  // either chains into setOptions / setVariants if those slices are
+  // dirty, or redirects to the list. On stale-category (BAD_REQUEST
   // category_not_found) it surfaces an inline banner and re-queries the
   // current set so the chips reflect what the server has now.
   const setCategoriesMutation = trpc.products.setCategories.useMutation({
-    onSuccess: (data, variables) => {
-      // Clear dirty BEFORE navigating so the beforeunload listener
-      // doesn't fire on the redirect.
-      dirtyRef.current = false;
+    onSuccess: (data) => {
+      const newUpdatedAt = data?.productUpdatedAt
+        ? new Date(data.productUpdatedAt).toISOString()
+        : null;
+      if (newUpdatedAt) setLiveExpectedUpdatedAt(newUpdatedAt);
       const updatedName =
-        nameEn !== initial.nameEn && nameEn.length > 0
-          ? nameEn
-          : initial.nameEn || initial.slug;
-      // Pass productUpdatedAt forward via the URL so future debugging is
-      // easier; the list page just shows the success flash.
-      void data;
-      void variables;
+        saveChainNameRef.current.length > 0
+          ? saveChainNameRef.current
+          : nameEn !== initial.nameEn && nameEn.length > 0
+            ? nameEn
+            : initial.nameEn || initial.slug;
+      saveChainNameRef.current = updatedName;
+      if (optionsDirty && newUpdatedAt) {
+        setOptionsMutation.mutate({
+          productId: initial.id,
+          expectedUpdatedAt: newUpdatedAt,
+          options: buildOptionsPayload(),
+        });
+        return;
+      }
+      if (variantsDirty && newUpdatedAt) {
+        setVariantsMutation.mutate({
+          productId: initial.id,
+          expectedUpdatedAt: newUpdatedAt,
+          variants: buildVariantsPayload(),
+        });
+        return;
+      }
+      // Done.
+      dirtyRef.current = false;
       router.push(
         `/${locale}/admin/products?updatedId=${encodeURIComponent(updatedName)}`,
       );
@@ -289,17 +558,107 @@ export function EditProductForm({
     },
   });
 
+  // Save chain: products.update → products.setCategories → products.setOptions
+  // → products.setVariants. Any leg may be skipped when its slice isn't
+  // dirty. The OCC token is threaded forward through each leg's
+  // returned `updatedAt`. We model the chain as a series of refs so the
+  // mutation `onSuccess` callbacks can read the latest plan without
+  // re-creating the mutation handles.
+  const saveChainNameRef = useRef<string>("");
+  const setVariantsMutation = trpc.products.setVariants.useMutation({
+    onSuccess: () => {
+      dirtyRef.current = false;
+      router.push(
+        `/${locale}/admin/products?updatedId=${encodeURIComponent(saveChainNameRef.current)}`,
+      );
+    },
+    onError: (err) => {
+      if (err.data?.code === "CONFLICT" && err.message === "stale_write") {
+        setStaleWriteFlash(true);
+        return;
+      }
+      if (err.data?.code === "CONFLICT" && err.message === "sku_taken") {
+        // Closed-set message — no SKU echoed. We can't pin the error
+        // to a specific row from the wire alone. Surface as a section-
+        // level inline error; the operator can scan the SKU column.
+        setVariantsTopError(t("variants.skuTaken"));
+        return;
+      }
+      if (err.data?.code === "BAD_REQUEST" && err.message === "duplicate_variant_combination") {
+        setVariantsTopError(t("variants.duplicateCombination"));
+        return;
+      }
+      if (err.data?.code === "FORBIDDEN" || err.data?.code === "UNAUTHORIZED") {
+        setTopError(t("forbidden"));
+        return;
+      }
+      setVariantsTopError(t("variants.saveError"));
+    },
+  });
+
+  const setOptionsMutation = trpc.products.setOptions.useMutation({
+    onSuccess: (data) => {
+      const newUpdatedAt = data?.productUpdatedAt
+        ? new Date(data.productUpdatedAt).toISOString()
+        : null;
+      if (newUpdatedAt) setLiveExpectedUpdatedAt(newUpdatedAt);
+      // Build the client-id → server-id map for option values. The
+      // server returned options in the same order we submitted them
+      // (positions match), and within each option the values are also
+      // in submitted order. We walk both side-by-side.
+      const idMap = new Map<string, string>();
+      const serverOpts = data?.options ?? [];
+      for (let i = 0; i < optionsState.length && i < serverOpts.length; i++) {
+        const localOpt = optionsState[i]!;
+        const remoteOpt = serverOpts[i]!;
+        idMap.set(localOpt.id, remoteOpt.id);
+        for (let j = 0; j < localOpt.values.length && j < remoteOpt.values.length; j++) {
+          idMap.set(localOpt.values[j]!.id, remoteOpt.values[j]!.id);
+        }
+      }
+      if (variantsDirty && newUpdatedAt) {
+        setVariantsMutation.mutate({
+          productId: initial.id,
+          expectedUpdatedAt: newUpdatedAt,
+          variants: buildVariantsPayloadWithIdMap(idMap),
+        });
+        return;
+      }
+      // Done.
+      dirtyRef.current = false;
+      router.push(
+        `/${locale}/admin/products?updatedId=${encodeURIComponent(saveChainNameRef.current)}`,
+      );
+    },
+    onError: (err) => {
+      if (err.data?.code === "CONFLICT" && err.message === "stale_write") {
+        setStaleWriteFlash(true);
+        return;
+      }
+      if (err.data?.code === "FORBIDDEN" || err.data?.code === "UNAUTHORIZED") {
+        setTopError(t("forbidden"));
+        return;
+      }
+      setVariantsTopError(t("variants.saveError"));
+    },
+  });
+
   const mutation = trpc.products.update.useMutation({
     onSuccess: (data) => {
       // First leg succeeded. Capture the freshly-bumped OCC token from
-      // the wire return for the second leg.
+      // the wire return for the next leg.
       const newUpdatedAt = data?.updatedAt
         ? new Date(data.updatedAt).toISOString()
         : null;
       if (newUpdatedAt) setLiveExpectedUpdatedAt(newUpdatedAt);
 
-      // If categories also changed, fire setCategories with the fresh
-      // OCC token. Otherwise we're done — clear dirty + redirect.
+      const updatedName =
+        (data?.name as { en: string } | undefined)?.en ?? data?.slug ?? "";
+      saveChainNameRef.current = updatedName;
+
+      // Chain: setCategories → setOptions → setVariants → done. We
+      // queue each leg only if its slice is dirty; otherwise we fall
+      // through to the next.
       if (selectedCategoryIdsKey !== baselineCategoryIdsKey && newUpdatedAt) {
         setCategoriesMutation.mutate({
           productId: initial.id,
@@ -308,9 +667,23 @@ export function EditProductForm({
         });
         return;
       }
+      if (optionsDirty && newUpdatedAt) {
+        setOptionsMutation.mutate({
+          productId: initial.id,
+          expectedUpdatedAt: newUpdatedAt,
+          options: buildOptionsPayload(),
+        });
+        return;
+      }
+      if (variantsDirty && newUpdatedAt) {
+        setVariantsMutation.mutate({
+          productId: initial.id,
+          expectedUpdatedAt: newUpdatedAt,
+          variants: buildVariantsPayload(),
+        });
+        return;
+      }
       dirtyRef.current = false;
-      const updatedName =
-        (data?.name as { en: string } | undefined)?.en ?? data?.slug ?? "";
       router.push(
         `/${locale}/admin/products?updatedId=${encodeURIComponent(updatedName)}`,
       );
@@ -405,6 +778,8 @@ export function EditProductForm({
     if (
       mutation.isPending ||
       setCategoriesMutation.isPending ||
+      setOptionsMutation.isPending ||
+      setVariantsMutation.isPending ||
       !dirty
     ) {
       return;
@@ -413,20 +788,104 @@ export function EditProductForm({
     setTopError(null);
     setStaleWriteFlash(false);
     setStaleCategoriesFlash(false);
+    setVariantsTopError(null);
+
+    // Save chain entry-point: each leg is conditional and threads OCC
+    // forward via its own onSuccess.
+    const fallbackName =
+      nameEn !== initial.nameEn && nameEn.length > 0
+        ? nameEn
+        : initial.nameEn || initial.slug;
+    saveChainNameRef.current = fallbackName;
 
     if (productFieldsChanged()) {
-      // Two-leg save: products.update first; on success the update
-      // mutation chains into setCategories iff categories also changed.
       mutation.mutate(buildPayload());
       return;
     }
-    // Categories-only edit. Skip update; call setCategories directly
-    // with the current live OCC token (which equals
-    // initial.expectedUpdatedAt because nothing else was saved).
-    setCategoriesMutation.mutate({
-      productId: initial.id,
-      expectedUpdatedAt: liveExpectedUpdatedAt,
-      categoryIds: selectedCategoryIds,
+    if (selectedCategoryIdsKey !== baselineCategoryIdsKey) {
+      setCategoriesMutation.mutate({
+        productId: initial.id,
+        expectedUpdatedAt: liveExpectedUpdatedAt,
+        categoryIds: selectedCategoryIds,
+      });
+      return;
+    }
+    if (optionsDirty) {
+      setOptionsMutation.mutate({
+        productId: initial.id,
+        expectedUpdatedAt: liveExpectedUpdatedAt,
+        options: buildOptionsPayload(),
+      });
+      return;
+    }
+    if (variantsDirty) {
+      setVariantsMutation.mutate({
+        productId: initial.id,
+        expectedUpdatedAt: liveExpectedUpdatedAt,
+        variants: buildVariantsPayload(),
+      });
+    }
+  }
+
+  function buildOptionsPayload(): Array<{
+    id?: string;
+    name: { en: string; ar: string };
+    values: Array<{
+      id?: string;
+      value: { en: string; ar: string };
+    }>;
+  }> {
+    return optionsState.map((o) => ({
+      ...(persistedOptionIds.has(o.id) ? { id: o.id } : {}),
+      name: { en: o.name.en, ar: o.name.ar },
+      values: o.values.map((v) => ({
+        // Include the value id only when its parent option is persisted
+        // (a fresh option type's values are always brand new — server
+        // mints both). Client-only ids would be rejected by the server
+        // with option_value_not_found.
+        ...(persistedOptionIds.has(o.id) ? { id: v.id } : {}),
+        value: { en: v.value.en, ar: v.value.ar },
+      })),
+    }));
+  }
+
+  function buildVariantsPayload(): Array<{
+    id?: string;
+    sku: string;
+    priceMinor: number;
+    currency: string;
+    stock: number;
+    active: boolean;
+    optionValueIds: string[];
+  }> {
+    return buildVariantsPayloadWithIdMap(new Map());
+  }
+
+  function buildVariantsPayloadWithIdMap(
+    valueIdMap: ReadonlyMap<string, string>,
+  ): Array<{
+    id?: string;
+    sku: string;
+    priceMinor: number;
+    currency: string;
+    stock: number;
+    active: boolean;
+    optionValueIds: string[];
+  }> {
+    return variantRows.map((r) => {
+      // Re-map client-minted value-ids to their server-minted
+      // counterparts (from setOptions's response). Persisted ids are
+      // not in the map and pass through.
+      const tuple = r.tuple.map((id) => valueIdMap.get(id) ?? id);
+      return {
+        ...(r.id ? { id: r.id } : {}),
+        sku: r.sku,
+        priceMinor: r.priceMinor ?? 0,
+        currency: r.currency,
+        stock: r.stock ?? 0,
+        active: r.active,
+        optionValueIds: tuple,
+      };
     });
   }
 
@@ -445,7 +904,12 @@ export function EditProductForm({
   }
 
   const submitDisabled =
-    !hydrated || mutation.isPending || setCategoriesMutation.isPending || !dirty;
+    !hydrated ||
+    mutation.isPending ||
+    setCategoriesMutation.isPending ||
+    setOptionsMutation.isPending ||
+    setVariantsMutation.isPending ||
+    !dirty;
   const slugChanged = slug !== initial.slug;
 
   return (
@@ -664,6 +1128,36 @@ export function EditProductForm({
         </button>
       </section>
 
+      {/* Options panel — chunk 1a.5.2. Inline list, no per-option sheet. */}
+      <OptionsPanel
+        options={optionsState}
+        isPersistedOption={(id) => persistedOptionIds.has(id)}
+        onAddOption={optionsHandlers.onAddOption}
+        onUpdateOption={optionsHandlers.onUpdateOption}
+        onAddValue={optionsHandlers.onAddValue}
+        onUpdateValue={optionsHandlers.onUpdateValue}
+        onRemoveValue={optionsHandlers.onRemoveValue}
+      />
+
+      {/* Variants list — chunk 1a.5.2. Cartesian rows when options
+          defined; flat single-variant form when not. */}
+      {variantsTopError ? (
+        <p
+          role="alert"
+          data-testid="variants-top-error"
+          className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-400"
+        >
+          {variantsTopError}
+        </p>
+      ) : null}
+      <VariantsList
+        rows={variantRows}
+        options={optionsState}
+        locale={locale === "ar" ? "ar" : "en"}
+        rowErrors={variantRowErrors}
+        onUpdateRow={updateVariantRow}
+      />
+
       {/* Destructive Remove product affordance — visually separated
           from the primary Save/Cancel actions; opens its own confirm
           dialog. Sits above the sticky action bar so the action bar
@@ -818,6 +1312,66 @@ export function EditProductForm({
       />
     </form>
   );
+}
+
+/** Stable JSON snapshot of options for dirty-tracking — content only. */
+function snapshotOptions(options: ReadonlyArray<EditorOption>): string {
+  return JSON.stringify(
+    options.map((o) => ({
+      // The id is part of the snapshot only for persisted options;
+      // freshly-minted client ids change every render, so we'd otherwise
+      // get a permanently-dirty memo. We strip ids by storing positions
+      // and the localized name/value text only.
+      n: o.name,
+      p: o.position,
+      v: o.values.map((v) => ({ v: v.value, p: v.position })),
+    })),
+  );
+}
+
+/** Stable JSON snapshot of variants for dirty-tracking — content only. */
+function snapshotVariants(variants: ReadonlyArray<EditorVariant>): string {
+  return JSON.stringify(
+    variants.map((v) => ({
+      s: v.sku,
+      p: v.priceMinor,
+      c: v.currency,
+      st: v.stock,
+      a: v.active,
+      // optionValueIds are part of the variant identity and must
+      // contribute. We sort them to be insertion-order independent.
+      o: [...v.optionValueIds].sort(),
+    })),
+  );
+}
+
+/** Stable snapshot of the per-key variant edit Map — content only. */
+function variantStateSnapshot(state: ReadonlyMap<string, VariantRow>): string {
+  const entries = [...state.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(
+    entries.map(([k, r]) => [
+      k,
+      r.sku,
+      r.priceMinor,
+      r.stock,
+      r.currency,
+      r.active,
+    ]),
+  );
+}
+
+/** Fall-back row when an updateVariantRow call hits a key the cartesian doesn't yet know about. */
+function emptyRowForKey(key: string): VariantRow {
+  return {
+    id: undefined,
+    key,
+    tuple: [],
+    sku: "",
+    priceMinor: null,
+    currency: "SAR",
+    stock: null,
+    active: true,
+  };
 }
 
 interface FieldProps {

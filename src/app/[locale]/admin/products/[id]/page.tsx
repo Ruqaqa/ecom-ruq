@@ -9,7 +9,7 @@ import { resolveRequestIdentity } from "@/server/auth/resolve-request-identity";
 import { resolveMembership } from "@/server/auth/membership";
 import { appDb, withTenant } from "@/server/db";
 import { buildAuthedTenantContext, isWriteRole } from "@/server/tenant/context";
-import { getProduct } from "@/server/services/products/get-product";
+import { getProductWithVariants } from "@/server/services/variants/get-product-with-variants";
 import type { ProductOwner, ProductPublic } from "@/server/services/products/create-product";
 import { listCategories } from "@/server/services/categories/list-categories";
 import { listCategoriesForProduct } from "@/server/services/categories/list-for-product";
@@ -17,6 +17,10 @@ import {
   buildCategoryOptions,
   type CategoryOption,
 } from "@/lib/categories/build-category-options";
+import type {
+  EditorOption,
+  EditorVariant,
+} from "@/lib/variants/build-variant-rows";
 import { EditProductForm } from "./edit-product-form";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -58,6 +62,8 @@ export default async function EditProductPage({
   let product: ProductOwner | ProductPublic | null = null;
   let categoryOptions: CategoryOption[] = [];
   let initialCategoryIds: string[] = [];
+  let initialOptions: EditorOption[] = [];
+  let initialVariants: EditorVariant[] = [];
   let loadError = false;
   if (appDb) {
     const authedCtx = buildAuthedTenantContext(
@@ -66,16 +72,14 @@ export default async function EditProductPage({
     );
     try {
       // Three independent reads pipelined on one tx — no data dependency
-      // between them. listCategories returns the full live tree (depth-3
-      // cap; small) for the picker; listForProduct fills the chip prefill.
-      // Cross-tenant / phantom productId from listForProduct returns an
-      // empty array (existence-leak guard).
-      const [productResult, treeResult, linkedResult] = await withTenant(
+      // between them. getProductWithVariants returns product + options +
+      // variants in one composite call (chunk 1a.5.1, no N+1).
+      const [productWithVariants, treeResult, linkedResult] = await withTenant(
         appDb,
         authedCtx,
         (tx) =>
           Promise.all([
-            getProduct(tx, { id: tenant.id }, role, { id }),
+            getProductWithVariants(tx, { id: tenant.id }, role, { id }),
             listCategories(
               tx,
               { id: tenant.id, defaultLocale: tenant.defaultLocale },
@@ -90,7 +94,18 @@ export default async function EditProductPage({
             ),
           ]),
       );
-      product = productResult;
+      product = productWithVariants?.product ?? null;
+      initialOptions = productWithVariants?.options ?? [];
+      initialVariants =
+        productWithVariants?.variants.map((v) => ({
+          id: v.id,
+          sku: v.sku,
+          priceMinor: v.priceMinor,
+          currency: v.currency,
+          stock: v.stock,
+          active: v.active,
+          optionValueIds: v.optionValueIds,
+        })) ?? [];
       categoryOptions = buildCategoryOptions(treeResult.items);
       initialCategoryIds = linkedResult.items.map((c) => c.id);
     } catch {
@@ -166,6 +181,8 @@ export default async function EditProductPage({
             }}
             categoryOptions={categoryOptions}
             initialCategoryIds={initialCategoryIds}
+            initialOptions={initialOptions}
+            initialVariants={initialVariants}
           />
         </div>
       </div>
