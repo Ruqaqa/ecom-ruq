@@ -89,6 +89,35 @@ export function variantRowKey(tuple: ReadonlyArray<string>): string {
   return [...tuple].sort().join(":");
 }
 
+/** Optional knobs for `buildVariantRows`. See `transitionMergePolicy`. */
+export interface BuildVariantRowsOptions {
+  /**
+   * "strict" (default, 1a.5.2 contract): rows merge only by tuple-
+   * equality. The collapse-to-default row hydrates from a default-tuple
+   * input row (empty `optionValueIds`) iff one exists; otherwise it is
+   * blank.
+   *
+   * "preserve-first-touched" (1a.5.3 State-C transition): adds two
+   * fall-back hydrations on top of strict tuple-equality:
+   *   - When `options.length === 0` AND no default-tuple input row is
+   *     present, the default row hydrates from the FIRST input row whose
+   *     SKU / priceMinor / stock has been touched (operator typed
+   *     something). When no input rows are touched, the default row is
+   *     blank.
+   *   - When `options.length > 0` AND the first generated tuple has no
+   *     tuple-equality match, the first generated row hydrates from the
+   *     unique default-tuple input row (i.e. the flat form's data
+   *     carries into the first row of the cartesian on single → multi
+   *     expand).
+   *
+   * Strict tuple-equality matches still take priority over either
+   * fall-back; a persisted default-tuple row beats preserve-first-
+   * touched on collapse, and a tuple-matching row beats flat-form
+   * carry-over on expand.
+   */
+  transitionMergePolicy?: "strict" | "preserve-first-touched";
+}
+
 /**
  * Materialise the cartesian product of options × values in option-
  * position order, merging any existing variant rows by tuple-equality.
@@ -97,19 +126,30 @@ export function variantRowKey(tuple: ReadonlyArray<string>): string {
  * mode). Existing variant rows whose tuple is empty hydrate the
  * default row; this is what enables the Screen 3 State C transition
  * back to the flat form without losing data.
+ *
+ * The optional `transitionMergePolicy` extends merge semantics for the
+ * 1a.5.3 State-C live transition — see `BuildVariantRowsOptions`.
  */
 export function buildVariantRows(
   options: ReadonlyArray<EditorOption>,
   existing: ReadonlyArray<EditorVariant>,
+  opts?: BuildVariantRowsOptions,
 ): VariantRow[] {
+  const policy = opts?.transitionMergePolicy ?? "strict";
+
   const existingByKey = new Map<string, EditorVariant>();
   for (const v of existing) {
     existingByKey.set(variantRowKey(v.optionValueIds), v);
   }
 
   if (options.length === 0) {
-    const match = existingByKey.get("default");
-    return [makeRow([], match)];
+    const exact = existingByKey.get("default");
+    if (exact) return [makeRow([], exact)];
+    if (policy === "preserve-first-touched") {
+      const firstTouched = existing.find(isTouched);
+      if (firstTouched) return [makeRow([], firstTouched)];
+    }
+    return [makeRow([], undefined)];
   }
 
   const sortedOptions = [...options].sort(
@@ -131,7 +171,26 @@ export function buildVariantRows(
     tuples.push(...next);
   }
 
-  return tuples.map((t) => makeRow(t, existingByKey.get(variantRowKey(t))));
+  const flatFormSeed =
+    policy === "preserve-first-touched"
+      ? existingByKey.get("default")
+      : undefined;
+
+  return tuples.map((t, index) => {
+    const tupleMatch = existingByKey.get(variantRowKey(t));
+    if (tupleMatch) return makeRow(t, tupleMatch);
+    if (index === 0 && flatFormSeed) return makeRow(t, flatFormSeed);
+    return makeRow(t, undefined);
+  });
+}
+
+/**
+ * A variant row is "touched" iff the operator typed any SKU / price /
+ * stock into it. Used by the State-C preserve-first-touched policy to
+ * decide which collapsed row hydrates the default row.
+ */
+function isTouched(v: EditorVariant): boolean {
+  return v.sku.length > 0 || v.priceMinor > 0 || v.stock > 0;
 }
 
 function makeRow(tuple: string[], match: EditorVariant | undefined): VariantRow {

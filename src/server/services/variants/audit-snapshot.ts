@@ -57,6 +57,16 @@ export interface OptionsAuditSnapshot {
   hash: string;
 }
 
+/**
+ * `after` snapshot carries `cascadedVariantIds`: every variant row
+ * hard-deleted by the call, sorted, ids only. Bound: ≤ MAX_VARIANTS_
+ * PER_PRODUCT (100) per call. SKUs / localized text never cross.
+ * 1a.5.3 spec §1 + security §2.
+ */
+export interface OptionsAuditAfterSnapshot extends OptionsAuditSnapshot {
+  cascadedVariantIds: string[];
+}
+
 export function buildOptionsAuditSnapshot(
   input: OptionsAuditInput,
 ): OptionsAuditSnapshot {
@@ -84,6 +94,41 @@ export function buildOptionsAuditSnapshot(
     valuesCount,
     valueIds,
     hash: shortHash({ productId: input.productId, options: hashPayload }),
+  };
+}
+
+/**
+ * `after` snapshot variant — same shape as `OptionsAuditSnapshot` plus
+ * the sorted `cascadedVariantIds`. The hash payload includes the
+ * cascaded id set so a cascade-true call produces a different hash
+ * than the same options post-state with no cascade (forensic detector).
+ */
+export function buildOptionsAuditAfterSnapshot(
+  input: OptionsAuditInput,
+  cascadedVariantIds: readonly string[],
+): OptionsAuditAfterSnapshot {
+  const sortedCascaded = [...cascadedVariantIds].sort();
+  const base = buildOptionsAuditSnapshot(input);
+  // Recompute hash including the cascaded id set, so cascade-true vs
+  // cascade-false post-states are forensically distinguishable.
+  const hashPayload = [...input.options]
+    .map((o) => ({
+      id: o.id,
+      position: o.position,
+      valueIds: o.values.map((v) => v.id).sort(),
+      valuePositions: [...o.values]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((v) => v.position),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    ...base,
+    hash: shortHash({
+      productId: input.productId,
+      options: hashPayload,
+      cascadedVariantIds: sortedCascaded,
+    }),
+    cascadedVariantIds: sortedCascaded,
   };
 }
 

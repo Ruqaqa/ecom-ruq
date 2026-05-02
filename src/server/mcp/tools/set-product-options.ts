@@ -1,21 +1,24 @@
 /**
- * `set_product_options` — MCP mutation tool (chunk 1a.5.1).
+ * `set_product_options` — MCP mutation tool (chunk 1a.5.1, amended 1a.5.3).
  *
  * Mirrors the `set_product_categories` shape:
  *   - `auditMode:"mutation"` (registered in registry.ts) — runWithAudit
  *     opens withTenant + writes success / failure audit rows. Audit
  *     `before`/`after` are bounded snapshots (`{count, ids, hash}`-style)
- *     — spec §7.
+ *     — spec §7. `after` carries `cascadedVariantIds` per 1a.5.3 spec §1.
  *   - `.strict()` at the MCP seam so adversarial extra keys reject.
  *   - bearer + isWriteRole gate; tools/list never advertises this tool
  *     to support / customer / anonymous identities.
  *
- * Tool description (verbatim from spec §8) explicitly declares the
- * SET-REPLACE contract and the 1a.5.1 transitional refusal of removal.
+ * Tool description (verbatim from 1a.5.3 security spec §7) declares the
+ * SET-REPLACE contract AND the cascade-on-omission contract for
+ * autonomous agents — omitting an option type from input is a removal,
+ * and every variant row referencing any of its values is hard-deleted
+ * in the same call.
  *
- * No `confirm: true` — non-destructive set-replace at the product
- * level. Removal of a current option/value is REJECTED in 1a.5.1
- * (option_remove_not_supported_yet); the cascade flow lives in 1a.5.3.
+ * No `confirm: true` — consistent with set_product_variants and
+ * set_product_categories. The cascade contract is documented in the
+ * tool description (carried in tools/list payloads to autonomous agents).
  */
 import { z } from "zod";
 import type { McpTool } from "./registry";
@@ -49,9 +52,14 @@ export const setProductOptionsTool: McpTool<
     "value without deleting it, include its existing id in the input with " +
     "the new fields. To add a new option type or value, omit the id field " +
     "— the server mints one. " +
-    "An option or value present today but missing from the input is " +
-    "REJECTED in this version (BAD_REQUEST option_remove_not_supported_yet); " +
-    "use the future remove-option flow when it lands. " +
+    "An option type present today but missing from the input is REMOVED " +
+    "from the product; ALL VARIANT ROWS that reference any value of that " +
+    "option type are HARD-DELETED in the same call. Variant rows do not " +
+    "have a recovery window — the parent product's soft-delete is the " +
+    "broader recovery net. Removing an option value (keeping the option " +
+    "type) is similarly a removal: every variant referencing that value " +
+    "is hard-deleted. There is no preview; if you are unsure, list the " +
+    "product's current variants first via getProductWithVariants. " +
     "Caps: at most 3 option types per product, at most 100 values per " +
     "option. Owner or staff. Optimistic concurrency on the product's " +
     "expectedUpdatedAt.",

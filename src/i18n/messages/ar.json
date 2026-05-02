@@ -161,8 +161,16 @@
           "valuesLabel": "القيم",
           "valueRemoveAriaLabel": "إزالة القيمة",
           "removeOptionCta": "إزالة",
-          "removeOptionDisabledHelp": "ستتاح إزالة هذا النوع بعد أن تتمكن من مراجعة التنويعات المتأثرة.",
-          "validationRequired": "كلٌّ من العربية والإنجليزية مطلوب."
+          "removeOptionAriaLabel": "إزالة نوع الخيار {name}",
+          "validationRequired": "كلٌّ من العربية والإنجليزية مطلوب.",
+          "removeOptionDialog": {
+            "heading": "حذف \"{name}\"؟",
+            "body": "حذف هذا النوع من الخيارات سيؤدي إلى حذف صفوف التنويعات الناتجة عنه.",
+            "cascadeWarning": "{count, plural, =0 {لن تُحذف أي صفوف تنويعات.} zero {لن تُحذف أي صفوف تنويعات.} one {سيؤدي ذلك إلى حذف صف تنويعة واحد.} two {سيؤدي ذلك إلى حذف صفّي تنويعة.} few {سيؤدي ذلك إلى حذف # صفوف تنويعات.} many {سيؤدي ذلك إلى حذف # صف تنويعة.} other {سيؤدي ذلك إلى حذف # صف تنويعة.}}",
+            "collapsePreview": "سيعود منتجك إلى نسخة واحدة. سيُحتفظ برمز SKU والسعر والمخزون من الصف الأول.",
+            "confirm": "حذف نوع الخيار",
+            "cancel": "إلغاء"
+          }
         },
         "variants": {
           "headingSingle": "التنويعة",
@@ -175,11 +183,47 @@
           "currencyAffix": "ر.س",
           "stockAffix": "قطعة",
           "skuRequired": "رمز SKU مطلوب.",
-          "skuTaken": "رمز SKU هذا مستخدم لتنويعة أخرى.",
+          "skuTaken": "أحد هذه الرموز SKU مستخدم بالفعل. راجع التكرارات وحاول مرة أخرى.",
+          "duplicateSkuInForm": "رمز SKU هذا مستخدم في صف آخر داخل هذا المنتج.",
           "priceInvalid": "يجب أن يكون صفرًا أو أكثر.",
           "stockInvalid": "يجب أن يكون صفرًا أو أكثر.",
           "duplicateCombination": "هذه التركيبة مستخدمة في تنويعة أخرى.",
-          "saveError": "تعذّر حفظ التنويعات. تحقّق من المدخلات."
+          "saveError": "تعذّر حفظ التنويعات. تحقّق من المدخلات.",
+          "serverMaxVariantsExceeded": "سيؤدي ذلك إلى إنشاء أكثر من ١٠٠ تنويعة. قلّل عدد قيم الخيارات.",
+          "capWarning": "{count, plural, zero {لن تنشأ أي تنويعات.} one {ستنشأ تنويعة واحدة فقط.} two {ستنشأ تنويعتان.} few {ستنشأ # تنويعات.} many {سيؤدي هذا التركيب من الخيارات إلى إنشاء # تنويعة — أكثر من حد ١٠٠ تنويعة لكل منتج. قلّل بعض قيم الخيارات أو قسّم المنتج إلى منتجات منفصلة.} other {سيؤدي هذا التركيب من الخيارات إلى إنشاء # تنويعة — أكثر من حد ١٠٠ تنويعة لكل منتج. قلّل بعض قيم الخيارات أو قسّم المنتج إلى منتجات منفصلة.}}",
+          "bulkSelect": {
+            "enterSelectMode": "تحديد",
+            "exitSelectMode": "تم",
+            "selectAllVisible": "تحديد الكل",
+            "selectionCount": "{count, plural, =0 {لم يُحدد شيء} zero {لم يُحدد شيء} one {حُدد عنصر واحد} two {حُدد عنصران} few {حُدد # عناصر} many {حُدد # عنصرًا} other {حُدد # عنصر}}",
+            "rowSelectAriaLabel": "تحديد التنويعة {label}",
+            "toolbarAriaLabel": "إجراءات جماعية على التنويعات"
+          },
+          "bulkApply": {
+            "heading": "{count, plural, zero {التطبيق على التنويعات} one {التطبيق على تنويعة واحدة} two {التطبيق على تنويعتين} few {التطبيق على # تنويعات} many {التطبيق على # تنويعة} other {التطبيق على # تنويعة}}",
+            "applyPriceLabel": "تطبيق السعر",
+            "applyStockLabel": "تطبيق المخزون",
+            "overwriteHelper": "سيستبدل القيمة الحالية في كل صف محدد.",
+            "applyCta": "{count, plural, zero {تطبيق} one {تطبيق على تنويعة واحدة} two {تطبيق على تنويعتين} few {تطبيق على # تنويعات} many {تطبيق على # تنويعة} other {تطبيق على # تنويعة}}",
+            "cancel": "إلغاء",
+            "close": "إغلاق",
+            "backdropDismiss": "تجاهل"
+          },
+          "removeRow": {
+            "kebabAriaLabel": "إجراءات التنويعة",
+            "removeMenuItem": "حذف هذه التنويعة",
+            "inlineConfirmQuestion": "حذف هذه التنويعة؟",
+            "inlineConfirmRemove": "حذف",
+            "inlineConfirmCancel": "إلغاء"
+          },
+          "collapseNotice": {
+            "body": "تم حذف صفوف التنويعات. تم الاحتفاظ برمز SKU والسعر والمخزون من التنويعة الأولى.",
+            "dismissAriaLabel": "إغلاق الإشعار"
+          },
+          "expandNotice": {
+            "body": "تم حفظ رمز SKU والسعر والمخزون. سوف تظهر على صف التنويعة الأول بعد إضافة قيم الخيارات.",
+            "dismissAriaLabel": "إغلاق الإشعار"
+          }
         }
       }
     },

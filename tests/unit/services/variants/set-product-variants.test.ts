@@ -262,6 +262,16 @@ describe("setProductVariants — happy path", () => {
     expect(r2.variants).toHaveLength(2);
     expect(r2.before.count).toBe(4);
     expect(r2.after.count).toBe(2);
+    // 1a.5.3 security §9.6 — Level B happy path for variant-row removal
+    // via omission. The two omitted variant ids appear in `before.ids`
+    // but NOT in `after.ids`; the hash legitimately differs.
+    const redS = r1.variants.find((v) => v.sku === "RED-S")!;
+    const redM = r1.variants.find((v) => v.sku === "RED-M")!;
+    expect(r2.before.ids).toContain(redS.id);
+    expect(r2.before.ids).toContain(redM.id);
+    expect(r2.after.ids).not.toContain(redS.id);
+    expect(r2.after.ids).not.toContain(redM.id);
+    expect(r2.before.hash).not.toBe(r2.after.hash);
     const skus = await readVariantSkus(seed.productId);
     expect(skus).toEqual(["BLUE-M", "BLUE-S"]);
   });

@@ -213,17 +213,12 @@ for (const locale of ["en", "ar"] as const) {
     await row2.getByTestId("variant-price").fill("1250.00");
     await row2.getByTestId("variant-stock").fill("8");
 
-    // Remove-option affordance is disabled in 1a.5.2 — covered here
-    // so the matrix asserts the disabled-state copy is wired in both
-    // locales (the active cascade flow lands in 1a.5.3). The helper
-    // paragraph carries its own testid so the assertion doesn't
-    // couple to the en or ar copy text.
+    // Remove-option affordance was disabled in 1a.5.2 and went live in
+    // 1a.5.3 (cascade-confirm dialog). Here we only assert it is now
+    // ENABLED on the matrix; the active cascade flow has its own spec
+    // (`product-variants-admin-polish.spec.ts`).
     const removeOption = newOptionCard.getByTestId("option-remove-cta");
-    await expect(removeOption).toBeDisabled();
-    await expect(removeOption).toHaveAttribute("aria-disabled", "true");
-    await expect(
-      newOptionCard.getByTestId("remove-option-cta-disabled-helper"),
-    ).toBeVisible();
+    await expect(removeOption).toBeEnabled();
 
     // axe-clean before submit.
     await expectAxeClean(page);

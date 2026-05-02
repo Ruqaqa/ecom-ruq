@@ -416,6 +416,61 @@ describe("setProductVariants — cross-tenant opacity (spec §6)", () => {
   });
 });
 
+describe("setProductOptions — cascade probe is byte-equal to no-cascade probe (1a.5.3, security §9.1)", () => {
+  it("cross-tenant / cross-product / phantom optionId via cascade attempt — Level B byte-equal", async () => {
+    // 1a.5.3 lifts the transitional refusal of removal. A hostile call
+    // that sets only ONE of the two existing options (i.e. attempts to
+    // remove the other), AND injects a foreign optionId in the kept
+    // option's id slot, must produce an envelope byte-equal to the
+    // no-cascade probe envelope. Otherwise a probe could distinguish
+    // "your input would have triggered cascade" from "your input
+    // wouldn't have" — and that becomes an existence oracle on the
+    // kept-vs-removed option-id state of someone else's product.
+    const { setProductOptions } = await import(
+      "@/server/services/variants/set-product-options"
+    );
+    const tenantA = await makeTenant();
+    const tenantB = await makeTenant();
+    const seedA = await seedProductWithTwoOptions(tenantA);
+    const seedAOther = await seedProductWithTwoOptions(tenantA);
+    const seedB = await seedProductWithTwoOptions(tenantB);
+    const phantomOptionId = randomUUID();
+
+    // Probe: hostile call shaped to LOOK like a cascade — only one
+    // option in the input (the second is implicitly removed) — but
+    // the kept option carries a foreign optionId. The foreign-id check
+    // fires BEFORE any removal lands, so the cascade is an attempted
+    // contract that the server refuses opaquely.
+    const probe = (foreignOptionId: string) =>
+      captureErr(
+        withTenant(superDb, ctxFor(tenantA), (tx) =>
+          setProductOptions(tx, { id: tenantA }, "owner", {
+            productId: seedA.productId,
+            expectedUpdatedAt: seedA.productUpdatedAt.toISOString(),
+            options: [
+              {
+                id: foreignOptionId,
+                name: { en: "C", ar: "ل" },
+                values: [{ value: { en: "R", ar: "ح" } }],
+              },
+            ],
+          }),
+        ),
+      );
+
+    const fpCrossTenant = fingerprint(await probe(seedB.colorOptionId));
+    const fpCrossProduct = fingerprint(await probe(seedAOther.colorOptionId));
+    const fpPhantom = fingerprint(await probe(phantomOptionId));
+
+    // Level B — byte-equal across cross-tenant / cross-product /
+    // phantom even when the call shape would have implied a cascade.
+    expect(fpCrossTenant).toEqual(fpCrossProduct);
+    expect(fpCrossProduct).toEqual(fpPhantom);
+    expect(fpCrossTenant.message).toBe("option_not_found");
+    expect(fpCrossTenant.code).toBe("BAD_REQUEST");
+  });
+});
+
 describe("setProductOptions + setProductVariants — Level A across probe-row groups", () => {
   it("envelope shape + body-key-set (excluding message) byte-equal across DIFFERENT probe-row groups", async () => {
     // Spec §6 Level A: across rows the envelope and the body keys

@@ -205,17 +205,22 @@ describe("setProductOptions — happy path", () => {
     // Rename-only audit invariant: localized text is intentionally
     // EXCLUDED from the bounded audit snapshot (spec §7 — keeps PDPL-
     // undeletable storage free of buyer-derived copy). The hash is
-    // computed over ids + positions + value-id sets, so renaming
-    // 'Color' → 'Colour' does NOT change the hash. The structural
-    // change-detector remains stable; investigators see no false
-    // positive on a pure-rename. To detect a name change, audit
-    // consumers compare the wire return, not the audit chain.
-    expect(r2.before.hash).toBe(r2.after.hash);
+    // computed over ids + positions + value-id sets (+ cascadedVariantIds
+    // on `after` per 1a.5.3), so renaming 'Color' → 'Colour' does NOT
+    // shift the structural id-set. The id-set + value-id-set remain
+    // stable across the rename. The cascadedVariantIds is empty here
+    // (no removal), so the only post-1a.5.3 hash-payload delta vs the
+    // `before` snapshot is the inclusion of an empty `cascadedVariantIds`
+    // key on `after`'s hash payload — that makes the two hashes
+    // legitimately distinct in the new scheme. The structural-stability
+    // invariant the original 1a.5.1 test guarded is now expressed as
+    // optionIds + valueIds equality across snapshots:
     expect(r2.before.optionIds).toEqual(r2.after.optionIds);
     expect(r2.before.valueIds).toEqual(r2.after.valueIds);
+    expect(r2.after.cascadedVariantIds).toEqual([]);
   });
 
-  it("clears all options when input is empty AND no variants reference them", async () => {
+  it("clears all options when input is empty (1a.5.3 cascade — no variants reference them, so cascadedVariantIds is empty)", async () => {
     const { setProductOptions } = await import(
       "@/server/services/variants/set-product-options"
     );
@@ -231,18 +236,20 @@ describe("setProductOptions — happy path", () => {
       }),
     );
 
-    // 1a.5.1 SPEC: removing an option type via setProductOptions is REJECTED.
-    // The cascade flow lives in 1a.5.3. Empty-input over a populated product
-    // is exactly that — refused.
-    await expect(
-      withTenant(superDb, ctxFor(tenantId), (tx) =>
-        setProductOptions(tx, { id: tenantId }, "owner", {
-          productId: product.id,
-          expectedUpdatedAt: r1.productUpdatedAt.toISOString(),
-          options: [],
-        }),
-      ),
-    ).rejects.toThrow(/option_remove_not_supported_yet/);
+    // 1a.5.3 SPEC: removing an option type cascades into hard-deleting
+    // every variant referencing any of its values. With zero variants
+    // pre-existing, the cascade set is empty and the option simply
+    // drops.
+    const r2 = await withTenant(superDb, ctxFor(tenantId), (tx) =>
+      setProductOptions(tx, { id: tenantId }, "owner", {
+        productId: product.id,
+        expectedUpdatedAt: r1.productUpdatedAt.toISOString(),
+        options: [],
+      }),
+    );
+    expect(r2.options).toEqual([]);
+    expect(r2.cascadedVariantIds).toEqual([]);
+    expect(r2.after.optionsCount).toBe(0);
   });
 });
 

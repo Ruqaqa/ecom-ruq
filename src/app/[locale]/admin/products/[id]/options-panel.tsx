@@ -1,14 +1,16 @@
 /**
  * `<OptionsPanel>` — the Options block on the product edit page (chunk
- * 1a.5.2). Inline list of option-type cards (Screen 1 of the wireframe);
- * no per-option sheet — operators define options + values without losing
- * sight of the cap counter.
+ * 1a.5.2; remove-option cascade live in 1a.5.3). Inline list of
+ * option-type cards (Screen 1 of the wireframe); no per-option sheet —
+ * operators define options + values without losing sight of the cap
+ * counter.
  *
  * Controlled-only: the parent owns the options state. This component
- * mirrors that state into editor rows. Adds and renames stay client-
- * side until Save; removal of an existing option type is disabled with
- * helper copy because 1a.5.1's `setProductOptions` rejects
- * removal-via-set-replace (1a.5.3 wires the cascade flow).
+ * mirrors that state into editor rows. Adds, renames, and removes stay
+ * client-side until Save; removing an option type opens a cascade-
+ * warning dialog whose body shows the live count of variant rows that
+ * will be hard-deleted (the parent computes the count and passes it in
+ * via `cascadeCountFor`).
  *
  * Each option-type and option-value gets a stable client uuid so the
  * cartesian generator can key rows deterministically across renders.
@@ -17,15 +19,31 @@
  */
 "use client";
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
+import type { Locale } from "@/i18n/routing";
 import type { EditorOption, EditorOptionValue } from "@/lib/variants/build-variant-rows";
+import { RemoveOptionDialog } from "./remove-option-dialog";
 
 const MAX_OPTIONS = 3;
 
 interface Props {
   options: EditorOption[];
+  locale: Locale;
   /** Returns true iff the option's id was already on the server when the form mounted. */
   isPersistedOption: (optionId: string) => boolean;
+  /**
+   * Returns the count of variant rows that will be hard-deleted if
+   * `optionId` is removed. The parent computes this from its current
+   * draft of variant rows × the option's value-ids.
+   */
+  cascadeCountFor: (optionId: string) => number;
+  /**
+   * True when the operator's current options + values draft would
+   * generate more than 100 variant combinations. Surfaces an amber
+   * advisory under the cap counter; the server is the trust boundary.
+   */
+  capWarning?: { count: number } | null;
   onAddOption: () => void;
   onUpdateOption: (
     optionId: string,
@@ -38,19 +56,41 @@ interface Props {
     next: { value?: { en?: string; ar?: string } },
   ) => void;
   onRemoveValue: (optionId: string, valueId: string) => void;
+  onRemoveOption: (optionId: string) => void;
 }
 
 export function OptionsPanel({
   options,
+  locale,
   isPersistedOption,
+  cascadeCountFor,
+  capWarning,
   onAddOption,
   onUpdateOption,
   onAddValue,
   onUpdateValue,
   onRemoveValue,
+  onRemoveOption,
 }: Props) {
   const t = useTranslations("admin.products.edit.options");
+  const tv = useTranslations("admin.products.edit.variants");
   const atCap = options.length >= MAX_OPTIONS;
+  const [removingOptionId, setRemovingOptionId] = useState<string | null>(null);
+  const removingOption = removingOptionId
+    ? options.find((o) => o.id === removingOptionId) ?? null
+    : null;
+  const cascadeCount = removingOptionId
+    ? cascadeCountFor(removingOptionId)
+    : 0;
+  const isLastOption = options.length === 1 && removingOption !== null;
+
+  function confirmRemove(): void {
+    if (!removingOptionId) return;
+    const id = removingOptionId;
+    setRemovingOptionId(null);
+    onRemoveOption(id);
+  }
+
   return (
     <section
       data-testid="options-panel"
@@ -70,6 +110,16 @@ export function OptionsPanel({
         </span>
       </div>
 
+      {capWarning ? (
+        <p
+          role="status"
+          data-testid="variants-cap-warning"
+          className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {tv("capWarning", { count: capWarning.count })}
+        </p>
+      ) : null}
+
       {options.length === 0 ? (
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
           {t("helperEmpty")}
@@ -82,12 +132,14 @@ export function OptionsPanel({
             <OptionTypeCard
               option={opt}
               persisted={isPersistedOption(opt.id)}
+              localizedName={opt.name[locale === "ar" ? "ar" : "en"]}
               onUpdateOption={(next) => onUpdateOption(opt.id, next)}
               onAddValue={() => onAddValue(opt.id)}
               onUpdateValue={(valueId, next) =>
                 onUpdateValue(opt.id, valueId, next)
               }
               onRemoveValue={(valueId) => onRemoveValue(opt.id, valueId)}
+              onRemoveOption={() => setRemovingOptionId(opt.id)}
             />
           </li>
         ))}
@@ -110,6 +162,21 @@ export function OptionsPanel({
           + {t("addOptionType")}
         </button>
       )}
+
+      <RemoveOptionDialog
+        open={removingOptionId !== null}
+        optionName={
+          removingOption
+            ? removingOption.name[locale === "ar" ? "ar" : "en"] ||
+              removingOption.name.en ||
+              removingOption.name.ar
+            : ""
+        }
+        cascadeCount={cascadeCount}
+        isLastOption={isLastOption}
+        onConfirm={confirmRemove}
+        onCancel={() => setRemovingOptionId(null)}
+      />
     </section>
   );
 }
@@ -117,6 +184,8 @@ export function OptionsPanel({
 interface OptionCardProps {
   option: EditorOption;
   persisted: boolean;
+  /** Localized option name for the remove CTA's aria-label. */
+  localizedName: string;
   onUpdateOption: (next: { name?: { en?: string; ar?: string } }) => void;
   onAddValue: () => void;
   onUpdateValue: (
@@ -124,17 +193,21 @@ interface OptionCardProps {
     next: { value?: { en?: string; ar?: string } },
   ) => void;
   onRemoveValue: (valueId: string) => void;
+  onRemoveOption: () => void;
 }
 
 function OptionTypeCard({
   option,
   persisted,
+  localizedName,
   onUpdateOption,
   onAddValue,
   onUpdateValue,
   onRemoveValue,
+  onRemoveOption,
 }: OptionCardProps) {
   const t = useTranslations("admin.products.edit.options");
+  const removeAriaName = localizedName.length > 0 ? localizedName : option.name.en || option.name.ar;
   return (
     <div
       data-testid="option-type-card"
@@ -181,30 +254,16 @@ function OptionTypeCard({
             className="mt-1 block h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-base dark:border-neutral-700 dark:bg-neutral-900"
           />
         </div>
-        {/* The cascade-confirm flow lands in 1a.5.3. Testids
-            `remove-option-dialog` / `remove-option-cascade-warning` /
-            `remove-option-confirm` / `remove-option-cancel` are
-            reserved by design for that wiring — do not strip them as
-            "unused" before 1a.5.3 ships, and do not rename
-            `remove-option-cta` here. */}
         <button
           type="button"
           data-testid="option-remove-cta"
-          disabled={true}
-          aria-disabled="true"
-          aria-describedby={`option-remove-help-${option.id}`}
-          className="h-11 self-end rounded-md border border-red-300 bg-white px-3 text-sm font-medium text-red-700 opacity-60 disabled:cursor-not-allowed dark:border-red-900/60 dark:bg-neutral-950 dark:text-red-400"
+          onClick={onRemoveOption}
+          aria-label={t("removeOptionAriaLabel", { name: removeAriaName })}
+          className="h-11 self-end rounded-md border border-red-300 bg-white px-3 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:bg-neutral-950 dark:text-red-400 dark:hover:bg-red-950/40"
         >
           {t("removeOptionCta")}
         </button>
       </div>
-      <p
-        id={`option-remove-help-${option.id}`}
-        data-testid="remove-option-cta-disabled-helper"
-        className="mt-1 text-xs text-neutral-500 dark:text-neutral-400"
-      >
-        {t("removeOptionDisabledHelp")}
-      </p>
 
       <div className="mt-4">
         <p className="text-xs font-medium uppercase tracking-wide text-neutral-700 dark:text-neutral-300">

@@ -40,6 +40,10 @@ interface Props {
   autoComplete?: InputHTMLAttributes<HTMLInputElement>["autoComplete"];
   /** Optional disabled flag. */
   disabled?: boolean;
+  /** Optional focus handler forwarded to the input. */
+  onFocus?: InputHTMLAttributes<HTMLInputElement>["onFocus"];
+  /** Optional blur handler forwarded to the input. */
+  onBlur?: InputHTMLAttributes<HTMLInputElement>["onBlur"];
 }
 
 export function InlineNumberField({
@@ -55,6 +59,8 @@ export function InlineNumberField({
   required,
   autoComplete,
   disabled,
+  onFocus,
+  onBlur,
 }: Props) {
   const id = useId();
   const errorId = error ? `${id}-error` : undefined;
@@ -93,6 +99,8 @@ export function InlineNumberField({
           aria-describedby={errorId}
           autoComplete={autoComplete}
           disabled={disabled}
+          onFocus={onFocus}
+          onBlur={onBlur}
           className="block w-full bg-transparent px-3 text-base outline-none disabled:opacity-60"
         />
       </div>

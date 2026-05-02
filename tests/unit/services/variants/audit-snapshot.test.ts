@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildOptionsAuditSnapshot,
+  buildOptionsAuditAfterSnapshot,
   buildVariantsAuditSnapshot,
   type OptionsAuditInput,
   type VariantsAuditInput,
@@ -135,6 +136,70 @@ describe("buildOptionsAuditSnapshot", () => {
     // No "name" or "value" keys anywhere in the snapshot.
     expect(serialized).not.toMatch(/"name"/);
     expect(serialized).not.toMatch(/"value"/);
+  });
+});
+
+describe("buildOptionsAuditAfterSnapshot (1a.5.3 cascade extension)", () => {
+  const baseInput: OptionsAuditInput = {
+    productId: "11111111-1111-4111-8111-111111111111",
+    options: [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        position: 0,
+        values: [{ id: "33333333-3333-4333-8333-333333333333", position: 0 }],
+      },
+    ],
+  };
+
+  it("attaches cascadedVariantIds (sorted) and matches the base shape otherwise", () => {
+    const snap = buildOptionsAuditAfterSnapshot(baseInput, [
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]);
+    expect(snap.cascadedVariantIds).toEqual([
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    ]);
+    expect(snap.optionIds).toEqual([
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    ]);
+    expect(snap.valueIds).toEqual([
+      "33333333-3333-4333-8333-333333333333",
+    ]);
+    expect(snap.hash).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("hash differs between cascade-true and cascade-false (forensic distinguishability)", () => {
+    const noCascade = buildOptionsAuditAfterSnapshot(baseInput, []);
+    const withCascade = buildOptionsAuditAfterSnapshot(baseInput, [
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    ]);
+    expect(noCascade.hash).not.toBe(withCascade.hash);
+  });
+
+  it("hash is invariant under cascadedVariantIds input ordering", () => {
+    const a = buildOptionsAuditAfterSnapshot(baseInput, [
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]);
+    const b = buildOptionsAuditAfterSnapshot(baseInput, [
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    ]);
+    expect(a.hash).toBe(b.hash);
+  });
+
+  it("contains no localized text or SKUs (PDPL guard preserved on extension)", () => {
+    const snap = buildOptionsAuditAfterSnapshot(baseInput, [
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    ]);
+    const serialized = JSON.stringify(snap);
+    expect(serialized).not.toMatch(/"name"/);
+    expect(serialized).not.toMatch(/"sku"/);
+    // The single jsonb-shaped key allowed in the snapshot is
+    // `cascadedVariantIds`. The literal token `"value"` (a JSONB
+    // localized key) must NOT appear.
+    expect(serialized).not.toMatch(/"value":/);
   });
 });
 

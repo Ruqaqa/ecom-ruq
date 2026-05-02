@@ -161,8 +161,16 @@
           "valuesLabel": "Values",
           "valueRemoveAriaLabel": "Remove value",
           "removeOptionCta": "Remove",
-          "removeOptionDisabledHelp": "Remove will be available once you can review which variants it affects.",
-          "validationRequired": "Both English and Arabic are required."
+          "removeOptionAriaLabel": "Remove option type {name}",
+          "validationRequired": "Both English and Arabic are required.",
+          "removeOptionDialog": {
+            "heading": "Remove \"{name}\"?",
+            "body": "Removing this option type will delete the variant rows generated from it.",
+            "cascadeWarning": "{count, plural, =0 {No variant rows will be removed.} one {This will remove # variant row.} other {This will remove # variant rows.}}",
+            "collapsePreview": "Your product will go back to a single version. Existing SKU, price, and stock from the first row will be kept.",
+            "confirm": "Remove option type",
+            "cancel": "Cancel"
+          }
         },
         "variants": {
           "headingSingle": "Variant",
@@ -175,11 +183,47 @@
           "currencyAffix": "SAR",
           "stockAffix": "pcs",
           "skuRequired": "SKU is required.",
-          "skuTaken": "This SKU is already used by another variant.",
+          "skuTaken": "One of these SKUs is already used. Check for duplicates and try again.",
+          "duplicateSkuInForm": "This SKU is used by another row in this product.",
           "priceInvalid": "Must be 0 or more.",
           "stockInvalid": "Must be 0 or more.",
           "duplicateCombination": "This combination is already used by another variant.",
-          "saveError": "Could not save variants. Please check your inputs."
+          "saveError": "Could not save variants. Please check your inputs.",
+          "serverMaxVariantsExceeded": "That would create more than 100 variants. Please reduce option values.",
+          "capWarning": "{count, plural, other {This combination of options would create # variants — more than the 100-per-product limit. Reduce some option values, or split into separate products.}}",
+          "bulkSelect": {
+            "enterSelectMode": "Select",
+            "exitSelectMode": "Done",
+            "selectAllVisible": "Select all",
+            "selectionCount": "{count, plural, =0 {None selected} one {# selected} other {# selected}}",
+            "rowSelectAriaLabel": "Select variant {label}",
+            "toolbarAriaLabel": "Bulk variant actions"
+          },
+          "bulkApply": {
+            "heading": "{count, plural, one {Apply to # variant} other {Apply to # variants}}",
+            "applyPriceLabel": "Apply price",
+            "applyStockLabel": "Apply stock",
+            "overwriteHelper": "Will overwrite the existing value on every selected row.",
+            "applyCta": "{count, plural, one {Apply to # variant} other {Apply to # variants}}",
+            "cancel": "Cancel",
+            "close": "Close",
+            "backdropDismiss": "Dismiss"
+          },
+          "removeRow": {
+            "kebabAriaLabel": "Variant actions",
+            "removeMenuItem": "Remove this variant",
+            "inlineConfirmQuestion": "Remove this variant?",
+            "inlineConfirmRemove": "Remove",
+            "inlineConfirmCancel": "Cancel"
+          },
+          "collapseNotice": {
+            "body": "Your variant rows were removed. The first variant's SKU, price, and stock were kept.",
+            "dismissAriaLabel": "Dismiss notice"
+          },
+          "expandNotice": {
+            "body": "We saved your SKU, price, and stock. They'll appear on the first variant row after you add option values.",
+            "dismissAriaLabel": "Dismiss notice"
+          }
         }
       }
     },
