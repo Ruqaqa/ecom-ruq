@@ -26,7 +26,7 @@ Sub-chunks shipped (one line per chunk; commit log + runbooks carry the detail):
 
 **Tests at end of 1a.5.3 (post-follow-ups):** 984 vitest across 117 files + 857 Playwright passed / 115 skipped on the full matrix (iphone-14-{en,ar}, pixel-7-{en,ar}, desktop-chromium-{en,ar}). Lint, typecheck, e2e-coverage, role-invariants all clean.
 
-**Next sub-chunk:** 1a.6 (bilingual content polish + missing-translation badge), then 1a.7 (image upload pipeline).
+**Next sub-chunk:** 1a.7 (image upload pipeline). 1a.6 (bilingual content polish + missing-translation badge) was **deferred on 2026-05-02** to a post-must-have polish pass — the JSONB `{ en, ar }` input pair already ships on products/variants/categories from 1a.2 onward, so the deferred scope is only the badge UI surface and (if still wanted) a "show only items missing Arabic" filter. Owner's reasoning: pre-launch, solo operator, small catalog → the badge mostly tells the owner what they already know; better revisited closer to launch when the catalog is large enough that the badge actually saves time. Picks up after Phase 1a images, Phase 1b storefront, and checkout/payments are in.
 
 **Tracked follow-up from 1a.3:** Per-worker tenant isolation for Playwright. Current per-spec slug-prefix helper at `tests/e2e/admin/products/helpers/scoped-row-locator.ts` is the stopgap. Architect + security explicitly deferred a deeper refactor (touches global-setup, tenants table, docker-compose seeded rows, `resolveTenant`, every fixture with hard-coded test tenant id). Pick up when admin-products spec count grows past ~6 or shared-tenant flake recurs. See `~/.claude/projects/-Users-bassel-development-ecom-ruq/memory/project_per_worker_test_isolation_followup.md`.
 
