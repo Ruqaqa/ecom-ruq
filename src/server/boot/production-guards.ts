@@ -162,7 +162,42 @@ export function assertProxyHeaderPresent(headers: {
   }
 }
 
+/**
+ * Image storage backend (chunk 1a.7.1) — refuses to boot if the operator
+ * picked an unknown backend or selected `bunny` without all three Bunny
+ * env vars. We construct the adapter and discard it — the factory itself
+ * carries the precondition checks.
+ *
+ * `runBootGuards` is also used by every Vitest spec via the global
+ * setup. To keep it cheap and side-effect-free under tests (which leave
+ * the storage env unset), we only run the storage check when the
+ * operator has explicitly selected a non-default backend. The default
+ * `local` backend has no preconditions to check.
+ */
+export function assertImageStorageConfigSafe(): void {
+  const backend = process.env.IMAGE_STORAGE_BACKEND?.toLowerCase();
+  if (!backend || backend === "local") return;
+  if (backend === "bunny") {
+    if (
+      !process.env.BUNNY_STORAGE_ZONE ||
+      !process.env.BUNNY_STORAGE_REGION ||
+      !process.env.BUNNY_STORAGE_PASSWORD
+    ) {
+      throw new ProductionGuardError(
+        "image_storage_bunny_misconfigured",
+        "Refusing to start: bunny image storage selected but BUNNY_STORAGE_{ZONE,REGION,PASSWORD} is not fully configured.",
+      );
+    }
+    return;
+  }
+  throw new ProductionGuardError(
+    "image_storage_unknown_backend",
+    `Refusing to start: IMAGE_STORAGE_BACKEND must be "local" or "bunny" (got: ${backend}).`,
+  );
+}
+
 export function runBootGuards(): void {
   assertDangerousEnvFlagsUnset();
   assertBetterAuthDbRoleSafe();
+  assertImageStorageConfigSafe();
 }

@@ -18,12 +18,22 @@
  * transport — slugs and dryRun do NOT cross into audit_log
  * (PDPL-undeletable, bilingual name fields could carry future buyer
  * PII; bounded shape protects the chain).
+ *
+ * Chunk 1a.7.1 Block 7 — image cleanup hook. Before the row delete,
+ * collect every product_image's storage_key + every derivative key.
+ * After the DB cascade fires, best-effort `Promise.allSettled` over
+ * `adapter.delete(...)`. Failures are logged to Sentry as
+ * `product_purge_storage_orphan` and NEVER thrown — the DB purge stays
+ * atomic. There is no job runner in 1a.7.1; manual operator cleanup
+ * until Phase 1b's job runner ships.
  */
 import { z } from "zod";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
-import { products } from "@/server/db/schema/catalog";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { products, productImages } from "@/server/db/schema/catalog";
 import type { Tx } from "@/server/db";
 import type { Role } from "@/server/tenant/context";
+import { getStorageAdapter, type StorageAdapter } from "@/server/storage";
+import { captureMessage, summarizeErrorForObs } from "@/server/obs/sentry";
 
 export interface HardDeleteExpiredTenantInfo {
   id: string;
@@ -48,6 +58,15 @@ export interface HardDeleteResult {
   dryRun: boolean;
 }
 
+export interface HardDeleteServiceDeps {
+  /**
+   * Storage adapter for the image cleanup hook. Defaults to the
+   * factory-resolved adapter at call time. Tests inject a local-disk
+   * adapter pointing at a temp dir.
+   */
+  storage?: StorageAdapter;
+}
+
 const PREVIEW_CAP = 50;
 const WINDOW = sql`interval '30 days'`;
 
@@ -56,6 +75,7 @@ export async function hardDeleteExpiredProducts(
   tenant: HardDeleteExpiredTenantInfo,
   role: Role,
   input: HardDeleteExpiredProductsInput,
+  deps: HardDeleteServiceDeps = {},
 ): Promise<HardDeleteResult> {
   if (role !== "owner") {
     throw new Error("hardDeleteExpiredProducts: owner-only");
@@ -86,6 +106,24 @@ export async function hardDeleteExpiredProducts(
   if (count === 0) {
     return { count: 0, ids: [], dryRun: false };
   }
+
+  // Collect every storage key for the doomed images BEFORE the row
+  // delete fires the FK cascade. We need the keys to feed the storage
+  // adapter; once the cascade runs, the rows are gone.
+  const expiredProductIds = expiredRows.map((r) => r.id);
+  const imageRows = await tx
+    .select({
+      storageKey: productImages.storageKey,
+      derivatives: productImages.derivatives,
+    })
+    .from(productImages)
+    .where(inArray(productImages.productId, expiredProductIds));
+  const allKeys: string[] = [];
+  for (const row of imageRows) {
+    allKeys.push(row.storageKey);
+    for (const d of row.derivatives) allKeys.push(d.storageKey);
+  }
+
   // Hard delete — same WHERE so a row that races out of expiry between
   // SELECT and DELETE is still safe (the predicate re-applies).
   await tx
@@ -97,5 +135,32 @@ export async function hardDeleteExpiredProducts(
         sql`now() - ${products.deletedAt} > ${WINDOW}`,
       ),
     );
+
+  // Best-effort storage purge — runs outside the row-delete tx (which
+  // is already committed by the time the caller's withTenant scope
+  // unwinds). Failures are logged, never thrown.
+  if (allKeys.length > 0) {
+    const adapter = deps.storage ?? getStorageAdapter();
+    const settled = await Promise.allSettled(allKeys.map((k) => adapter.delete(k)));
+    const failures = settled.filter((r) => r.status === "rejected");
+    if (failures.length > 0) {
+      captureMessage("product_purge_storage_orphan", {
+        level: "warning",
+        extra: {
+          orphanCount: failures.length,
+          totalKeys: allKeys.length,
+          // Only the COUNT goes to Sentry; the keys themselves derive
+          // from tenant slug + product slug and could leak product
+          // identifiers. The DB row is already gone — the operator
+          // recovers via direct storage admin, not by replaying keys
+          // out of Sentry.
+          sampleCause: summarizeErrorForObs(
+            (failures[0] as PromiseRejectedResult).reason,
+          ),
+        },
+      });
+    }
+  }
+
   return { count, ids, dryRun: false };
 }

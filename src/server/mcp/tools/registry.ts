@@ -54,6 +54,11 @@ import { hardDeleteExpiredCategoriesTool } from "./hard-delete-expired-categorie
 import { setProductCategoriesTool } from "./set-product-categories";
 import { setProductOptionsTool } from "./set-product-options";
 import { setProductVariantsTool } from "./set-product-variants";
+import { listProductImagesTool } from "./list-product-images";
+import { deleteProductImageTool } from "./delete-product-image";
+import { setProductCoverImageTool } from "./set-product-cover-image";
+import { setVariantCoverImageTool } from "./set-variant-cover-image";
+import { setProductImageAltTextTool } from "./set-product-image-alt-text";
 import { moveCategoryUpTool, moveCategoryDownTool } from "./move-category";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
@@ -155,6 +160,31 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   },
   {
     tool: setProductVariantsTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // 1a.7.1 — image pipeline metadata-only MCP tools. Bytes for upload
+  // and replace flow through /api/admin/images/{upload,replace} route
+  // handlers (Block 5b), NOT MCP — the MCP body cap is 64KB and
+  // images go up to 15MB. Listing returns the derivative ledger so an
+  // autonomous agent can see what's stored without holding the bytes.
+  {
+    tool: listProductImagesTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "none" },
+  },
+  {
+    tool: deleteProductImageTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: setProductCoverImageTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: setVariantCoverImageTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  {
+    tool: setProductImageAltTextTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
   // 1a.4.2 follow-up — sibling-swap reorder (replaces the leaky

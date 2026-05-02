@@ -7,11 +7,13 @@
 import { router } from "./init";
 import { productsRouter } from "./routers/products";
 import { categoriesRouter } from "./routers/categories";
+import { imagesRouter } from "./routers/images";
 import { tokensRouter } from "./routers/tokens";
 
 export const appRouter = router({
   products: productsRouter,
   categories: categoriesRouter,
+  images: imagesRouter,
   tokens: tokensRouter,
 });
 

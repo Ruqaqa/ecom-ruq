@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, index, uniqueIndex, unique, primaryKey, foreignKey, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { LocalizedText, LocalizedTextPartial } from "@/lib/i18n/localized";
+import type { ImageDerivative } from "./_types";
 import { tenants } from "./tenants";
 
 export const categories = pgTable(
@@ -181,22 +182,91 @@ export const productVariants = pgTable(
     stock: integer("stock").notNull().default(0),
     optionValueIds: jsonb("option_value_ids").$type<string[]>().notNull().default([]),
     active: boolean("active").notNull().default(true),
+    // 0 or 1 cover image per variant. Composite same-tenant FK to
+    // product_images declared in the table-options block below;
+    // ON DELETE SET NULL — image gone falls back to product cover.
+    coverImageId: uuid("cover_image_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("product_variants_product_id_idx").on(t.productId),
     uniqueIndex("product_variants_tenant_sku_unique").on(t.tenantId, t.sku),
+    // Anchors the composite FK from product_variants.cover_image_id back
+    // to product_images and from any future surface that needs it.
+    unique("product_variants_tenant_id_id_unique").on(t.tenantId, t.id),
     foreignKey({
       columns: [t.tenantId, t.productId],
       foreignColumns: [products.tenantId, products.id],
       name: "product_variants_product_same_tenant_fk",
     }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.tenantId, t.coverImageId],
+      foreignColumns: [productImages.tenantId, productImages.id],
+      name: "product_variants_cover_image_same_tenant_fk",
+    }).onDelete("set null"),
     // Defense-in-depth on the JSONB array length cap. The Zod schema
     // is the primary cap; this is the matching belt at the data layer.
     check(
       "product_variants_option_value_ids_max_3",
       sql`jsonb_typeof(${t.optionValueIds}) = 'array' AND jsonb_array_length(${t.optionValueIds}) <= 3`,
+    ),
+  ],
+);
+
+// Chunk 1a.7.1 — product images. Up to 10 per product (cap enforced
+// service-side under the per-product advisory lock; CHECK can't span
+// rows). Composite same-tenant FK to products mirrors the categories /
+// variants pattern; defense-in-depth against a row whose tenant_id
+// disagrees with its parent's. See migrations/0012_product_images.sql.
+//
+// `derivatives` is a denormalized JSONB ledger of every derivative file
+// (5 sizes × 3 formats = 15 entries). NOT an FK — the storefront renders
+// explicit width/height per <img> from this. The ORIGINAL file's key
+// lives on `storageKey`, not in this array; the original is retained
+// for re-derivation only and is never publicly served in 1a.7.1.
+export const productImages = pgTable(
+  "product_images",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull(),
+    position: integer("position").notNull().default(0),
+    // Monotonic counter bumped on `replaceProductImage`. Used in the
+    // storage key derivation so a replace produces a NEW key (avoids
+    // CDN cache staleness + mid-replace partial-content windows).
+    version: integer("version").notNull().default(1),
+    // SHA-256 hex of the original input bytes. Per-product duplicate
+    // detection — UNIQUE (product_id, fingerprint_sha256) below.
+    fingerprintSha256: text("fingerprint_sha256").notNull(),
+    // Adapter's opaque storage key for the ORIGINAL file.
+    // Pattern: "<tenant-slug>/<product-slug>-<position>-v<version>-original.<ext>"
+    storageKey: text("storage_key").notNull(),
+    originalFormat: text("original_format").notNull(),
+    originalWidth: integer("original_width").notNull(),
+    originalHeight: integer("original_height").notNull(),
+    originalBytes: integer("original_bytes").notNull(),
+    derivatives: jsonb("derivatives").$type<ImageDerivative[]>().notNull().default([]),
+    altText: jsonb("alt_text").$type<LocalizedTextPartial>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("product_images_product_id_idx").on(t.productId),
+    index("product_images_product_position_idx").on(t.productId, t.position),
+    // Anchor for composite same-tenant FKs from elsewhere (e.g.,
+    // product_variants.cover_image_id).
+    unique("product_images_tenant_id_id_unique").on(t.tenantId, t.id),
+    foreignKey({
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+      name: "product_images_product_same_tenant_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("product_images_product_fingerprint_unique").on(
+      t.productId,
+      t.fingerprintSha256,
     ),
   ],
 );

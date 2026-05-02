@@ -47,3 +47,8 @@ next-env.d.ts
 
 # Misc
 .turbo
+
+# Local image storage (chunk 1a.7.1) — original + derivative bytes.
+# Database row in `product_images` is the source of truth; the bytes are
+# regenerable artifacts and must never be committed.
+.storage/
