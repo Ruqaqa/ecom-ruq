@@ -398,19 +398,55 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - **1a.4 — Category management.** Categories form a single tree with one parent per category, depth capped at three levels (categories may be shallower). Products are many-to-many with categories from day one (a product can live under several categories — matches Shopify/Amazon/Sweetwater shape). Each category has a single Latin slug shared across both locales (the owner chose Latin URLs over Arabic-script URLs for share-ability; bilingual `name`/`description` still apply). Three sub-chunks land in order: **1a.4.1** services + tRPC + MCP (`list_categories`, `create_category`, `update_category`) with depth/cycle/slug-uniqueness guards, no UI. **1a.4.2** admin list/create/edit pages mirroring the products admin UX, plus a multi-select category picker on the product edit form. **1a.4.3** soft-delete + restore + owner-only hard-purge sweeper mirroring 1a.3 — soft-deleting a parent cascades to descendants in the same transaction, and restoring a child whose parent is still removed is refused.
 - **1a.5 — Variants.** Operator tooling for defining option types and managing variants (SKUs, prices, stock) per product; the data layer is partially in place via `product_options` / `product_option_values` / `product_variants` from Phase 0. Caps from §3.3 (≤3 option types per product, ≤100 variants per product) are enforced at the data layer. Per-variant cover photos wait for 1a.7's image pipeline (until then variants share the parent product's photos). Per-tenant **specifications + catalogue filters** are their own later chunk and do not block this work. The customer-facing variant **picker** (visible buttons, colour swatches, image swap, sticky add-to-cart, sold-out greying — per Baymard's product-page UX research and the patterns Shopify/Amazon/Apple/Sonos converge on) lands as part of Phase 1b's product detail page work; it cannot exist before there is a public product detail page. Three sub-chunks land in order: **1a.5.1** services + tRPC + MCP — `setProductOptions`, `setProductVariants`, `getProductWithVariants`; MCP tools `set_product_options` / `set_product_variants` (non-destructive set-replace, no `confirm: true`) — with Zod-enforced validation (≤3 options, ≤100 variants, no duplicate combinations, SKU uniqueness within tenant, price ≥ 0, stock ≥ 0), OCC on the parent product, and a per-tenant advisory lock during the variant-set diff to serialize concurrent edits to the same product. No UI. **1a.5.2** admin UX core — on the product edit page, an Options panel (add option types, add values per option) and a Variants grid (auto-generated from the cartesian product of the option values, per-row inline editing of SKU/price/stock); single-variant default mode (no options defined → simple SKU/price/stock form, not a grid); mobile-first list-style editor rather than a desktop data grid; both locales. **1a.5.3** admin UX polish — bulk select + apply price/stock to multiple rows; remove individual variant rows (hard delete; no soft-delete recovery for individual variant rows since the parent product's soft-delete already covers broader mistakes); remove an option type with cascade warning showing the live count of variant rows that will be removed; cap-hit pre-save error when defining options would generate more than 100 combinations; inline error messages for duplicate SKUs and out-of-range values.
 - **1a.6 — Bilingual content polish + missing-translation badge. *Deferred 2026-05-02 to a post-must-have polish pass.*** The JSONB `{ en, ar }` input pair already ships on products / variants / categories from 1a.2 onward; the deferred scope is just the badge UI surface (per-field "missing translation" indicator) and a "show only items missing Arabic" filter on admin lists. Reason for deferring: pre-launch, solo operator, small catalog — the badge mostly tells the owner what they already know. Revisit when the catalog is large enough that the badge actually saves time, after images (1a.7), storefront (Phase 1b), and checkout/payments are in.
-- **1a.7 — Image pipeline.** Photo upload, storage, and management for products and variants. Local filesystem storage first; the BunnyCDN swap lands inside the Launch infrastructure block at the top of Phase 1b. Customer-facing photo rendering (gallery, swipe carousel, pinch-to-zoom, variant-aware refresh) is Phase 1b's product detail page work — 1a.7 stops at "the data and the admin tooling exist".
+- **1a.7 — Image pipeline.** Photo upload, storage, processing, and admin tooling for products and variants. Local filesystem storage first; the BunnyCDN swap lands inside the Launch infrastructure block at the top of Phase 1b. Customer-facing photo rendering (gallery, swipe carousel, pinch-to-zoom, variant-aware refresh, OG meta tags, Product JSON-LD `image` field, browser priority/lazy hints) is Phase 1b's product detail page work — 1a.7 stops at "the data, the URLs, the derived sizes, and the admin tooling exist". 1a.7 produces everything Phase 1b needs to render correctly; Phase 1b wires it into the storefront markup.
 
-  *Scope this chunk (what we build now):*
-  - **Per-product photo library:** up to 10 photos per product. Max 10 MB per upload. Accepted upload formats: JPEG, PNG, WebP. Cap and limits match the Salla / Amazon / Shopify-tier industry norm for small catalogues.
-  - **Server-side processing:** every upload is re-encoded to AVIF + WebP with a JPEG fallback, and four sizes are generated (thumbnail ~200px, listing card ~400–600px, product page ~800–1200px, zoom ~2000px). The original is retained on disk so we can re-derive sizes/formats later without re-uploading. Format negotiation via `srcset`.
-  - **Display ratio:** 1:1 square at every size, centre-cropped at display time. The original aspect ratio is preserved on disk so the display contract can change later without re-uploading.
-  - **Cover photo:** the first photo in the library is the cover. Cover is changed via a "Set as cover" tap on any photo (works identically on mobile and desktop). Order beyond the cover is not customer-visible in 1a.7's scope, so no drag-to-reorder UI is built.
-  - **Per-variant cover:** each variant can be assigned a single cover photo from the product's photo library. Empty falls back to the product's cover. The underlying linkage is stored as a photo-to-variant relationship that allows multiple photos per variant tomorrow without schema change; the v1 admin UI enforces 0-or-1.
-  - **Optional bilingual alt text** per photo (`{ en, ar }`). Not required, surfaced as a polite nudge ("add a description for screen readers and search engines") rather than a wall.
-  - **Mobile-first upload UX:** tap to open device camera or library, multi-select, per-tile progress, tap-to-delete, tap-to-set-cover, tap-to-edit-alt-text. No drag interactions on phone — drag-to-reorder is not built and not exposed on desktop either (see deferred below).
-  - **Service layer:** `uploadProductImage`, `deleteProductImage`, `setProductCoverImage`, `setVariantCoverImage`, `setProductImageAltText` services per §2 (Zod-validated, audit-logged, tenant-scoped). Each gets a corresponding tRPC procedure and MCP tool. Destructive mutations (`deleteProductImage`) require `confirm: true` on the MCP surface per §6.
-  - **Caps enforced at the data layer:** ≤ 10 photos per product, ≤ 10 MB per upload, format and dimension validation server-side (do not trust client claims).
-  - **Sub-chunks:** **1a.7.1** services + tRPC + MCP, no UI; **1a.7.2** admin upload UI on the product edit page (library grid, multi-upload, cover selection, alt-text editing); **1a.7.3** per-variant cover assignment + mobile polish + e2e coverage in both locales.
+  *Acceptance rules on upload (validated server-side, client claims are not trusted):*
+  - Accepted formats: JPEG, PNG, WebP.
+  - **Minimum dimensions:** ≥ 1,000 px on the longest side. Below this, reject with a clear message (matches Amazon's zoom floor; below this anything looks bad on modern high-DPI screens).
+  - **Maximum file size:** 10 MB per photo. **Maximum dimensions:** 25 megapixels (≈ 5,000 × 5,000). Above either, reject (matches Shopify's cap; defends against phone camera-RAW uploads).
+  - **Per-product cap:** ≤ 10 photos.
+  - Aspect ratio is **not** enforced at upload — accept any orientation. The display contract handles cropping.
+
+  *Server-side processing pipeline (every upload):*
+  - **EXIF orientation honoured first**, then EXIF metadata stripped (privacy: phone photos carry GPS coordinates, device model, and exact timestamps). The orientation flag is baked into the actual pixels before stripping so phone photos never appear sideways on the storefront.
+  - **Five derived sizes:** thumbnail ~200 px, listing card ~400–600 px, product page ~800–1,200 px, zoom ~2,000 px, **share-preview 1,200 × 630** (the Open Graph dimension used by WhatsApp / Twitter / Facebook when shoppers share a product link — high-traffic share channels in the Gulf).
+  - **Three formats per size:** AVIF (quality 70), WebP (quality 75), JPEG fallback (quality 82). Documented sweet spots — higher is wasted bytes, lower starts showing artifacts.
+  - **Original is retained on disk** so all derivatives can be re-generated later without re-upload. Useful when we change the crop ratio, swap the storage backend (BunnyCDN), or tune compression.
+  - **Per-derivative dimensions stored alongside the photo record** so the storefront can emit explicit `width`/`height` on every rendered `<img>` (prevents layout shift, a Core Web Vitals signal).
+  - **Public URL is descriptive**, not opaque — e.g., `/images/<tenant>/<product-slug>-<n>.<ext>`. Internal storage IDs remain separate from public URLs. Per Google Search Central, descriptive filenames are a documented image-search ranking signal.
+  - **Duplicate detection by content fingerprint** (SHA hash of the original bytes) within the same product — same photo uploaded twice surfaces a friendly "this looks like the photo you uploaded earlier" prompt; operator chooses to keep or skip. Cross-product duplicates are not flagged (legitimate reuse case: same item across multiple listings).
+  - **Graceful failure path:** if processing chokes on a corrupt or weird file, the operator sees a clear per-photo error and the rest of the upload batch continues. The product save itself never fails because of one bad photo.
+
+  *Display ratio:*
+  - Customer-facing site shows photos at **1:1 square at every size**, centre-cropped at display time. Original aspect ratio preserved on disk so the display contract can change later without re-upload (e.g., switching to 4:5 portrait if a fashion vertical demands it). Identical aspect ratio across the catalogue and within every product gallery — universal industry practice (Shopify, Amazon, Salla, Apple, IKEA all enforce one ratio at display, not upload).
+
+  *Cover photo (per product):*
+  - First photo in the library is the cover. Cover changes via **tap-to-promote** on any photo — a "Set as cover" action that works identically on mobile and desktop. Order beyond the cover is not customer-visible in 1a.7's scope, so no drag-to-reorder UI is built.
+
+  *Per-variant cover:*
+  - Each variant can be assigned a single cover photo from the product's photo library. Empty falls back to the product's cover. Storage-style variants (capacity, RAM, etc.) typically leave it empty; visual variants (colour, finish) typically set it. Variant cover picker uses the **same tap-to-promote pattern** as the main library, for consistency.
+  - Storage shape (photo-to-variant relationship) supports multiple photos per variant tomorrow without schema change; the v1 admin UI enforces 0-or-1.
+
+  *Replace-in-place:*
+  - "Replace this photo" admin action swaps a photo's underlying file while preserving the photo record's identity, position in the library, alt text, and any variant linkage. Beats the delete-then-reupload-and-rewire workflow. Re-runs the full processing pipeline on the new file (EXIF strip, multi-size derivation, dimension store, fingerprint refresh).
+
+  *Optional bilingual alt text:*
+  - `{ en, ar }` per photo. Not required; surfaced as a polite nudge ("add a description for screen readers and search engines"), not a wall.
+
+  *Mobile-first upload UX:*
+  - Tap to open device camera or library, multi-select, per-tile progress, tap-to-delete, tap-to-set-cover, tap-to-edit-alt-text, tap-to-replace. No drag interactions on phone.
+
+  *Storage lifecycle:*
+  - Soft-deleted product → photos remain on disk, hidden in admin (matches the 30-day product recovery window from 1a.3).
+  - Hard-purge product (post 30-day window, owner-only operation per 1a.3) → photo files **and** all derivatives deleted from disk in the same operation, otherwise disk fills over time. Disk-deletion failures are logged and retried, never block the product purge.
+
+  *Service layer:*
+  - `uploadProductImage`, `replaceProductImage`, `deleteProductImage`, `setProductCoverImage`, `setVariantCoverImage`, `setProductImageAltText` services per §2 (Zod-validated, audit-logged, tenant-scoped). Each gets a corresponding tRPC procedure and MCP tool. Destructive mutations (`deleteProductImage`, `replaceProductImage` since it overwrites the underlying file) require `confirm: true` on the MCP surface per §6.
+
+  *Sub-chunks:*
+  - **1a.7.1** services + tRPC + MCP, no UI. Includes the full processing pipeline (validation, EXIF strip + rotation, multi-size + multi-format derivation, dimension store, descriptive public URLs, duplicate detection, graceful failure path, storage cleanup on hard-purge).
+  - **1a.7.2** admin upload UI on the product edit page (library grid, multi-upload, cover selection, alt-text editing, replace-in-place, delete).
+  - **1a.7.3** per-variant cover assignment + mobile polish + e2e coverage in both locales on mobile viewport.
 
   *Explicitly deferred to later phases (do not build now):*
   - **Per-variant photo *galleries*** (multiple photos per variant, not just a single cover). Foundation supports this without schema change. Revisit when the catalogue includes apparel / accessories where colour-specific photo sets are genuinely needed (the Amazon / AliExpress model). Single cover-per-variant covers ~90% of small Gulf catalogues; demand evidence (30,000+ WooCommerce stores using free per-variant-gallery plugins, multiple Shopify add-ons surviving at $8–$20/month) confirms this is mostly a fashion/apparel concern. Likely lands in a post-launch polish chunk alongside the bilingual badge.
@@ -419,6 +455,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
   - **Video uploads, 360° spin, 3D product views.**
   - **Bulk import** (CSV manifest, URL ingest, FTP).
   - **Drag-and-drop reordering on desktop.** Order beyond the cover is not customer-visible until per-variant galleries land, so reorder UI has nothing to express yet. Tap-to-promote-cover is the only ordering primitive in 1a.7.
+  - **Image moderation / NSFW detection.** Pointless for a controlled, owner-only catalogue.
   - **AI-generated bilingual alt text on upload** (Claude vision). This belongs to the AI-assisted bilingual entry workstream below, not the image pipeline chunk. Sequencing decided at the time the AI assist panel is scoped — it can land before or after 1a.7. The 1a.7 admin UI ships with a manual alt-text field that the AI assist will later auto-populate.
   - **BunnyCDN delivery.** Queued at the top of Phase 1b's Launch infrastructure block. Until then, files are served directly from the local filesystem via `next/image`.
 
@@ -467,10 +504,11 @@ This is the first time the project touches production hosting. It is delivered a
 *Public storefront pages*
 - Home (featured products, categories)
 - Category listing with filters (brand, price range, option facets)
-- Product detail page (variant selector, gallery, specs, related products)
+- Product detail page (variant selector, gallery, specs, related products). Gallery is a swipe carousel with visible thumbnails (not dot indicators — Baymard found 76% of mobile sites use dots-only and shoppers regularly miss photos). Pinch-to-zoom is table stakes; tap-to-zoom-overlay is the fallback. Variant switching swaps the cover photo using the per-variant cover assignment from 1a.7; the rest of the gallery stays the same in v1 (per-variant galleries are deferred — see 1a.7).
 - Search (Meilisearch-powered, with Arabic tokenization tuned: stop words, normalization of ا/أ/إ, ة/ه, ي/ى)
 - Basic static pages (about, contact)
 - Mobile-first responsive design (see NFRs in section 6)
+- **Image rendering hygiene** (consumes the data 1a.7 produces): explicit `width`/`height` on every rendered `<img>` (CLS prevention — Core Web Vitals signal); `fetchpriority="high"` on the hero / above-the-fold product image; `loading="lazy"` on every subsequent gallery image; `srcset` with the size set produced by 1a.7's pipeline so browsers fetch the right size for the device (high-DPI mobile gets the 1,200 px version; low-DPI gets the 600 px version).
 
 *Bilingual launch surface*
 - All seed products (20–30 realistic AV products across 2–3 categories) carry both `ar` and `en` content from launch
@@ -481,11 +519,11 @@ This is the first time the project touches production hosting. It is delivered a
 - Arabic typography (IBM Plex Sans Arabic or Tajawal) and Latin (Inter) loaded via `next/font`, aggressively subset
 
 *SEO*
-- `generateMetadata` with per-locale titles, descriptions, OG tags
-- JSON-LD: `Product`, `Offer`, `BreadcrumbList`, `Organization`
+- `generateMetadata` with per-locale titles, descriptions, OG tags. Product pages emit a 1,200 × 630 OG image referencing the share-preview derivative produced by 1a.7's pipeline so shared product links render correctly on WhatsApp / Twitter / Facebook (high-traffic share channels in the Gulf, especially WhatsApp).
+- JSON-LD: `Product` (with the photo library populated into the `image` array — required for Google's rich product cards in search), `Offer`, `BreadcrumbList`, `Organization`
 - Sitemaps per tenant per locale, referenced in `robots.txt`
 - Canonical URLs (critical when the same product lives under multiple categories)
-- Image sitemaps (AV is visual)
+- Image sitemaps (AV is visual) — entries reference the descriptive public URLs produced by 1a.7
 
 *Compliance & polish*
 - Cookie consent banner (PDPL-ready)
