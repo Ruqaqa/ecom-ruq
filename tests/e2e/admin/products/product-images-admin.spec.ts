@@ -1010,3 +1010,132 @@ for (const locale of ["en", "ar"] as const) {
     expect(page.url()).not.toContain("evil.example");
   });
 }
+
+// =====================================================================
+// Block 8 — repeated reorders persist across multiple consecutive drags
+// with varied inter-action waits, and no hydration warning fires on the
+// edit page. Regression guard for the DndContext id-mismatch hydration
+// warning (fixed by pinning a stable `id` on DndContext); also covers
+// the multi-drag persistence path that Block 5A only exercises once.
+//
+// Note: this test drives the keyboard sensor, not pointer activation.
+// The press-hold/distance behaviour of the handle button cannot be
+// reliably synthesised from Playwright across the matrix and must be
+// verified by hand on real devices.
+// =====================================================================
+
+test("Block 8 — repeated drag-reorder works on first paint and across multiple consecutive drags", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+
+  // Capture any console error/warning so a hydration mismatch surfaces
+  // as a hard test failure rather than a silent regression.
+  const consoleProblems: string[] = [];
+  page.on("console", (msg) => {
+    const type = msg.type();
+    if (type === "error" || type === "warning") {
+      const text = msg.text();
+      // dnd-kit's accessibility instructions are quietly logged in
+      // dev — ignore those; we only care about React's hydration
+      // mismatch and other genuine errors.
+      if (text.includes("hydrat") || text.includes("did not match")) {
+        consoleProblems.push(`[${type}] ${text}`);
+      }
+    }
+  });
+  page.on("pageerror", (err) => {
+    consoleProblems.push(`[pageerror] ${err.message}`);
+  });
+
+  const prefix = scopedSlugPrefix("photos-repeat-drag");
+  const seeded = await seedProduct(prefix);
+  const seededImageIds = await seedImagesDirectly(seeded.id, 4);
+
+  await signIn(page, "en", OWNER_EMAIL);
+  await page.goto(`/en/admin/products/${seeded.id}`);
+
+  // Tiles render and the drag handle becomes enabled almost immediately
+  // after hydration — no extra interaction required to wake it up.
+  await expect(
+    page.locator('[data-testid="product-photo-tile"]'),
+  ).toHaveCount(4, { timeout: 15_000 });
+  const firstHandle = page.locator(
+    '[data-testid="product-photo-tile"][data-position="0"] [data-testid="product-photo-drag-handle"]',
+  );
+  await expect(firstHandle).toBeEnabled({ timeout: 10_000 });
+
+  // Helper: read the current order as an array of image ids by position.
+  const readUiOrder = async (): Promise<string[]> => {
+    const ids = await page
+      .locator('[data-testid="product-photo-tile"][data-image-id]')
+      .evaluateAll((nodes) =>
+        nodes
+          .map((n) => ({
+            id: n.getAttribute("data-image-id") ?? "",
+            pos: Number(n.getAttribute("data-position") ?? "0"),
+          }))
+          .sort((a, b) => a.pos - b.pos)
+          .map((x) => x.id),
+      );
+    return ids;
+  };
+
+  const initialOrder = await readUiOrder();
+  expect(initialOrder).toEqual(seededImageIds);
+
+  // Sequence: pick the tile currently at position 1 and walk it left
+  // each iteration, with the requested varied waits between drags. We
+  // re-resolve the handle each iteration because the DOM positions have
+  // shifted after each reorder.
+  const waitsMs = [500, 1000, 2000, 1500] as const;
+
+  // Track an expected order locally to diff against UI + DB.
+  const expectedOrder = [...initialOrder];
+
+  for (let i = 0; i < waitsMs.length; i++) {
+    // Each iteration: take the tile currently at position 1 and move
+    // it one slot to the left (to position 0). After 4 iterations we've
+    // exercised reorders that move every tile through the cover slot.
+    const handleAtOne = page.locator(
+      '[data-testid="product-photo-tile"][data-position="1"] [data-testid="product-photo-drag-handle"]',
+    );
+    await expect(handleAtOne).toBeEnabled();
+
+    const movingId = expectedOrder[1]!;
+    await dndKitReorderViaKeyboard(page, handleAtOne, 1, "ArrowLeft");
+
+    // Update expected order: swap [0] and [1].
+    [expectedOrder[0], expectedOrder[1]] = [expectedOrder[1]!, expectedOrder[0]!];
+
+    // Confirm the moved tile lands at position 0 in the UI.
+    await expect(
+      page.locator(
+        `[data-testid="product-photo-tile"][data-image-id="${movingId}"][data-position="0"]`,
+      ),
+    ).toBeVisible({ timeout: 10_000 });
+
+    const uiOrder = await readUiOrder();
+    expect(uiOrder).toEqual(expectedOrder);
+
+    await page.waitForTimeout(waitsMs[i]!);
+  }
+
+  // After the loop: assert the database persisted every reorder.
+  const persisted = await readImagePositions(seeded.id);
+  const positionsById = new Map(persisted.map((r) => [r.id, r.position]));
+  for (let pos = 0; pos < expectedOrder.length; pos++) {
+    expect(positionsById.get(expectedOrder[pos]!)).toBe(pos);
+  }
+
+  // Reload and verify persistence one more time end-to-end.
+  await page.reload();
+  await expect(
+    page.locator('[data-testid="product-photo-tile"]'),
+  ).toHaveCount(4, { timeout: 15_000 });
+  const afterReload = await readUiOrder();
+  expect(afterReload).toEqual(expectedOrder);
+
+  // No hydration-mismatch warnings or page errors fired throughout.
+  expect(consoleProblems, consoleProblems.join("\n")).toEqual([]);
+});

@@ -535,9 +535,13 @@ export function PhotosSection({
   // ----- reorder handlers ---------------------------------------------------
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      // Long-press to pick up on phone, click-and-hold on desktop.
-      // Tolerance lets a small finger jitter not cancel the activation.
-      activationConstraint: { delay: 250, tolerance: 8 },
+      // Distance-based activation: drag fires the moment the pointer
+      // moves a few pixels off the dedicated handle button. Taps still
+      // register as clicks (zero movement → no drag). A time-based
+      // press-and-hold here was unreliable on the dedicated handle —
+      // any finger jitter inside the delay window silently cancelled
+      // the activation, which read to the operator as a dead button.
+      activationConstraint: { distance: 5 },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
@@ -762,6 +766,7 @@ export function PhotosSection({
       ) : (
         <>
           <DndContext
+            id="product-photos-dnd"
             sensors={sensors}
             onDragStart={onDragStart}
             onDragEnd={(e) => void onDragEnd(e)}
