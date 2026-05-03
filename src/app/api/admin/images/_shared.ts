@@ -29,6 +29,80 @@ export const NO_STORE_HEADERS: Record<string, string> = {
   "content-type": "application/json",
 };
 
+/**
+ * Same-origin guard for cookie-authed mutations. Returns null on accept,
+ * a `Response` (403 forbidden) on reject. Bearer-authed (PAT) requests
+ * fall through accept since bearer auth is server-trusted (no ambient
+ * cookie attack vector).
+ *
+ * Policy:
+ *   1. Host derivable from req.url? else reject.
+ *   2. Origin header present? compare host. Mismatch / parse-error reject.
+ *   3. Else Referer header present? compare host. Mismatch / parse-error reject.
+ *   4. Else Authorization: Bearer ...? accept (PAT path).
+ *   5. Else reject.
+ */
+export function assertSameOriginMutation(req: Request): Response | null {
+  let host: string;
+  try {
+    host = new URL(req.url).host.toLowerCase();
+  } catch {
+    return jsonError(403, { error: { code: "forbidden" } });
+  }
+  if (!host) {
+    return jsonError(403, { error: { code: "forbidden" } });
+  }
+
+  const origin = req.headers.get("origin");
+  if (origin) {
+    try {
+      const originHost = new URL(origin).host.toLowerCase();
+      if (originHost === host) return null;
+      return jsonError(403, { error: { code: "forbidden" } });
+    } catch {
+      return jsonError(403, { error: { code: "forbidden" } });
+    }
+  }
+
+  const referer = req.headers.get("referer");
+  if (referer) {
+    try {
+      const refHost = new URL(referer).host.toLowerCase();
+      if (refHost === host) return null;
+      return jsonError(403, { error: { code: "forbidden" } });
+    } catch {
+      return jsonError(403, { error: { code: "forbidden" } });
+    }
+  }
+
+  const auth = req.headers.get("authorization");
+  if (auth && auth.toLowerCase().startsWith("bearer ")) {
+    return null;
+  }
+
+  return jsonError(403, { error: { code: "forbidden" } });
+}
+
+/**
+ * Same-origin guard for cookie-authed reads. Sec-Fetch-Site is the
+ * primary signal in modern browsers; older browsers (and bearer-authed
+ * programmatic clients) fall through to accept since the UUID
+ * unguessability + admin auth gate is the defense.
+ *
+ * Reject only on Sec-Fetch-Site values that explicitly flag a cross-
+ * site request: anything other than `same-origin` or `none`. The
+ * bearer/PAT path is implicit — programmatic clients don't set
+ * Sec-Fetch-Site, so they fall through this guard naturally; admin
+ * auth + UUID unguessability are the defense for that channel.
+ */
+export function assertSameOriginRead(req: Request): Response | null {
+  const sfs = req.headers.get("sec-fetch-site");
+  if (sfs && sfs !== "same-origin" && sfs !== "none") {
+    return jsonError(403, { error: { code: "forbidden" } });
+  }
+  return null;
+}
+
 export interface ErrorBody {
   error: { code: string };
   existingImageId?: string;

@@ -59,6 +59,7 @@ import { deleteProductImageTool } from "./delete-product-image";
 import { setProductCoverImageTool } from "./set-product-cover-image";
 import { setVariantCoverImageTool } from "./set-variant-cover-image";
 import { setProductImageAltTextTool } from "./set-product-image-alt-text";
+import { reorderProductImagesTool } from "./reorder-product-images";
 import { moveCategoryUpTool, moveCategoryDownTool } from "./move-category";
 import { runSqlReadonlyTool } from "./run-sql-readonly";
 
@@ -185,6 +186,11 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   },
   {
     tool: setProductImageAltTextTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // 1a.7.2 follow-up — drag-reorder; set-replace contract.
+  {
+    tool: reorderProductImagesTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
   // 1a.4.2 follow-up — sibling-swap reorder (replaces the leaky

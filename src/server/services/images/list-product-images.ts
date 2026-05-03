@@ -16,8 +16,8 @@
  * ordering keeps test fixtures comparable.
  */
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
-import { productImages } from "@/server/db/schema/catalog";
+import { and, asc, eq, isNull } from "drizzle-orm";
+import { productImages, products } from "@/server/db/schema/catalog";
 import type { Tx } from "@/server/db";
 import type { Role } from "@/server/tenant/context";
 
@@ -52,6 +52,10 @@ export interface ListProductImagesResult {
     createdAt: Date;
     updatedAt: Date;
   }>;
+  // ISO-8601 datetime string of the parent product's `updated_at` for
+  // OCC. `null` when the product is invisible to the caller (cross-
+  // tenant, soft-deleted, or just not found). Empty-string is forbidden.
+  productUpdatedAt: string | null;
 }
 
 export async function listProductImages(
@@ -93,6 +97,24 @@ export async function listProductImages(
     )
     .orderBy(asc(productImages.position), asc(productImages.id));
 
+  // OCC token. Independent of whether the image rows are empty (a
+  // product with zero images still returns a token). Null when the
+  // product is invisible to the caller (cross-tenant, soft-deleted, or
+  // just not found).
+  const productRow = await tx
+    .select({ updatedAt: products.updatedAt })
+    .from(products)
+    .where(
+      and(
+        eq(products.tenantId, tenant.id),
+        eq(products.id, parsed.productId),
+        isNull(products.deletedAt),
+      ),
+    )
+    .limit(1);
+  const productUpdatedAt =
+    productRow.length > 0 ? productRow[0]!.updatedAt.toISOString() : null;
+
   return {
     productId: parsed.productId,
     images: rows.map((r) => ({
@@ -110,5 +132,6 @@ export async function listProductImages(
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     })),
+    productUpdatedAt,
   };
 }

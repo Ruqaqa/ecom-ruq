@@ -32,6 +32,8 @@ import { TransitionNotice } from "@/components/admin/transition-notice";
 import { OptionsPanel } from "./options-panel";
 import { VariantsList, type RowErrors } from "./variants-list";
 import { BulkApplySheet, type BulkApplyPatch } from "./bulk-apply-sheet";
+import { PhotosSection } from "./photos-section";
+import type { ListProductImagesResult } from "@/server/services/images/list-product-images";
 
 const MAX_VARIANTS_PER_PRODUCT = 100;
 
@@ -54,6 +56,10 @@ interface Props {
   initialCategoryIds: ReadonlyArray<string>;
   initialOptions: ReadonlyArray<EditorOption>;
   initialVariants: ReadonlyArray<EditorVariant>;
+  /** Server-fetched image ledger for SSR initial-data hydration. */
+  initialImages: ListProductImagesResult;
+  /** Snapshot of product.updated_at at render time — OCC seed for photo writes. */
+  productUpdatedAt: string;
 }
 
 /** Mint a runtime client id for a fresh option/value (server replaces on save). */
@@ -70,6 +76,8 @@ export function EditProductForm({
   initialCategoryIds,
   initialOptions,
   initialVariants,
+  initialImages,
+  productUpdatedAt,
 }: Props) {
   const t = useTranslations("admin.products.edit");
   const tc = useTranslations("admin.products.create");
@@ -956,7 +964,10 @@ export function EditProductForm({
   function buildPayload(): Parameters<typeof mutation.mutate>[0] {
     const payload: Record<string, unknown> = {
       id: initial.id,
-      expectedUpdatedAt: initial.expectedUpdatedAt,
+      // Use the lifted live token so out-of-band photo mutations that
+      // bumped products.updated_at don't trigger a stale-write on
+      // products.update. Same-day follow-up to chunk 1a.7.2 (Block 1).
+      expectedUpdatedAt: liveExpectedUpdatedAt,
     };
     if (slug !== initial.slug) payload.slug = slug;
     if (nameEn !== initial.nameEn || nameAr !== initial.nameAr) {
@@ -1466,6 +1477,18 @@ export function EditProductForm({
         </button>
       </section>
 
+      {/* Photos section — chunk 1a.7.2. Writes are out-of-band of the
+          four-leg save chain, but each settle lifts the fresh
+          productUpdatedAt back into liveExpectedUpdatedAt so a
+          subsequent Save doesn't false-fire as stale (1a.7.2 Block 1
+          follow-up). */}
+      <PhotosSection
+        productId={initial.id}
+        initialImages={initialImages}
+        initialProductUpdatedAt={productUpdatedAt}
+        onProductUpdatedAtChange={setLiveExpectedUpdatedAt}
+      />
+
       {/* Options panel — chunk 1a.5.2; cap-warning + cascade-confirm
           live in 1a.5.3. */}
       <OptionsPanel
@@ -1652,7 +1675,7 @@ export function EditProductForm({
                   if (removeMutation.isPending) return;
                   removeMutation.mutate({
                     id: initial.id,
-                    expectedUpdatedAt: initial.expectedUpdatedAt,
+                    expectedUpdatedAt: liveExpectedUpdatedAt,
                     confirm: true,
                   });
                 }}

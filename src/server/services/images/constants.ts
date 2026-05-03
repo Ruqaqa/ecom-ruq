@@ -9,11 +9,23 @@
  * storefront and not before.
  */
 
-export const SHARP_DECOMPRESSION_LIMIT_PIXELS = 25_000_000;
+// Re-exported for back-compat with existing imports in process.ts; new
+// code imports from @/lib/images/limits.
+import {
+  MAX_ORIGINAL_IMAGE_BYTES,
+  MIN_LONG_EDGE_PX as MIN_LONG_EDGE_PX_SHARED,
+  SHARP_DECOMPRESSION_LIMIT_PIXELS as SHARP_DECOMPRESSION_LIMIT_PIXELS_SHARED,
+} from "@/lib/images/limits";
 
-export const ORIGINAL_BYTES_LIMIT = 10 * 1024 * 1024;
+export const SHARP_DECOMPRESSION_LIMIT_PIXELS =
+  SHARP_DECOMPRESSION_LIMIT_PIXELS_SHARED;
 
-export const MIN_LONG_EDGE_PX = 1000;
+export const ORIGINAL_BYTES_LIMIT = MAX_ORIGINAL_IMAGE_BYTES;
+
+export const MIN_LONG_EDGE_PX = MIN_LONG_EDGE_PX_SHARED;
+
+// Per-product cap. Enforced in upload (image_count_exceeded) and reorder (Zod schema).
+export const MAX_PRODUCT_IMAGE_COUNT = 10;
 
 export type DerivativeSize = "thumb" | "card" | "page" | "zoom" | "share";
 export type DerivativeFormat = "avif" | "webp" | "jpeg";

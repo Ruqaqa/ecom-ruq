@@ -46,6 +46,10 @@ import {
   setProductImageAltText,
   SetProductImageAltTextInputSchema,
 } from "@/server/services/images/set-product-image-alt-text";
+import {
+  reorderProductImages,
+  ReorderProductImagesInputSchema,
+} from "@/server/services/images/reorder-product-images";
 
 export const imagesRouter = router({
   list: publicProcedure
@@ -60,7 +64,11 @@ export const imagesRouter = router({
         });
       }
       if (!appDb) {
-        return { productId: input.productId, images: [] };
+        return {
+          productId: input.productId,
+          images: [],
+          productUpdatedAt: null,
+        };
       }
       const { userId } = ctx.identity;
       const tokenId =
@@ -207,6 +215,42 @@ export const imagesRouter = router({
         return {
           imageId: result.imageId,
           altText: result.altText,
+        };
+      } catch (err) {
+        if (err instanceof StaleWriteError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "stale_write",
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  reorder: mutationProcedure
+    .use(requireRole({ roles: ["owner", "staff"] }))
+    .input(ReorderProductImagesInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const role = deriveRole(ctx);
+      if (!role) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "role derivation failed",
+        });
+      }
+      try {
+        const result = await reorderProductImages(
+          ctx.tx,
+          { id: ctx.tenant.id },
+          role,
+          input,
+        );
+        ctx.auditPayloads.before = result.before;
+        ctx.auditPayloads.after = result.after;
+        return {
+          productId: result.productId,
+          productUpdatedAt: result.productUpdatedAt,
         };
       } catch (err) {
         if (err instanceof StaleWriteError) {

@@ -71,9 +71,9 @@ import {
   buildImageAuditSnapshot,
   type ImageAuditSnapshot,
 } from "./audit-snapshot";
+import { MAX_PRODUCT_IMAGE_COUNT } from "./constants";
 import type { ImageDerivative } from "@/server/db/schema/_types";
 
-const MAX_IMAGES_PER_PRODUCT = 10;
 const SLUG_SHAPE = /^[a-z0-9-]{1,64}$/;
 
 export interface UploadProductImageTenantInfo {
@@ -190,7 +190,7 @@ export async function uploadProductImage(
         eq(productImages.productId, parsed.productId),
       ),
     );
-  if (existingRows.length >= MAX_IMAGES_PER_PRODUCT) {
+  if (existingRows.length >= MAX_PRODUCT_IMAGE_COUNT) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "image_count_exceeded",

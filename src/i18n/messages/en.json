@@ -224,6 +224,65 @@
             "body": "We saved your SKU, price, and stock. They'll appear on the first variant row after you add option values.",
             "dismissAriaLabel": "Dismiss notice"
           }
+        },
+        "images": {
+          "heading": "Photos",
+          "emptyHeading": "No photos yet. Add some so shoppers can see this product.",
+          "addCta": "Add photos",
+          "tile": {
+            "actionsAriaLabel": "Photo actions",
+            "coverBadge": "Cover",
+            "setCoverMenuItem": "Set as cover",
+            "editAltMenuItem": "Edit description",
+            "replaceMenuItem": "Replace",
+            "removeMenuItem": "Remove",
+            "uploadingLabel": "Uploading",
+            "uploadingProgress": "Uploading {percent}%",
+            "failedRetry": "Upload failed. Tap to retry.",
+            "altMissing": "Add a description"
+          },
+          "reorderHandleAriaLabel": "Reorder photo",
+          "reorderLiveAnnouncePicked": "Picked up photo at position {from}.",
+          "reorderLiveAnnounceMoved": "Moved to position {to}.",
+          "reorderLiveAnnounceDropped": "Dropped at position {to}.",
+          "reorderLiveAnnounceCancelled": "Cancelled.",
+          "dropZoneOverlay": "Drop photos here",
+          "dropZoneHelper": "Release to upload.",
+          "altSheet": {
+            "heading": "Photo description",
+            "helper": "Describe what's in the photo for shoppers using screen readers.",
+            "englishLabel": "Description (English)",
+            "arabicLabel": "Description (Arabic)",
+            "save": "Save",
+            "cancel": "Cancel"
+          },
+          "removeDialog": {
+            "heading": "Remove this photo?",
+            "body": "The photo will be deleted from this product. This cannot be undone.",
+            "confirm": "Remove",
+            "cancel": "Cancel"
+          },
+          "replace": {
+            "helper": "Pick a new image to replace this one. The previous file will be removed."
+          },
+          "errors": {
+            "tooLarge": "That photo is too large. Please use a file under 10 MB.",
+            "tooSmall": "That photo is too small. Please use one at least 1000 pixels on the long edge.",
+            "unsupportedFormat": "Only JPG, PNG, and WebP photos are supported.",
+            "dimensionsExceeded": "That photo is too tall or wide for processing. Please resize it.",
+            "corrupt": "That photo could not be read. It may be damaged.",
+            "duplicate": "This product already has that photo.",
+            "countExceeded": "This product has reached its photo limit. Remove one before adding more.",
+            "storageFailed": "We couldn't save that photo. Please try again in a moment.",
+            "staleWrite": "These photos were changed somewhere else. Refresh the page to see the latest.",
+            "reorderSetMismatch": "Photos changed while you were reordering. The list has been refreshed — please try again.",
+            "reorderFailed": "Couldn't save the new order. Please try again.",
+            "unknown": "Something went wrong. Please try again."
+          },
+          "coverFlash": "Cover updated.",
+          "replacedFlash": "Photo replaced.",
+          "removedFlash": "Photo removed.",
+          "addedFlash": "{count, plural, one {Added # photo.} other {Added # photos.}}"
         }
       }
     },

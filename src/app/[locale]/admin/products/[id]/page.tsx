@@ -14,6 +14,10 @@ import type { ProductOwner, ProductPublic } from "@/server/services/products/cre
 import { listCategories } from "@/server/services/categories/list-categories";
 import { listCategoriesForProduct } from "@/server/services/categories/list-for-product";
 import {
+  listProductImages,
+  type ListProductImagesResult,
+} from "@/server/services/images/list-product-images";
+import {
   buildCategoryOptions,
   type CategoryOption,
 } from "@/lib/categories/build-category-options";
@@ -64,6 +68,11 @@ export default async function EditProductPage({
   let initialCategoryIds: string[] = [];
   let initialOptions: EditorOption[] = [];
   let initialVariants: EditorVariant[] = [];
+  let initialImages: ListProductImagesResult = {
+    productId: id,
+    images: [],
+    productUpdatedAt: null,
+  };
   let loadError = false;
   if (appDb) {
     const authedCtx = buildAuthedTenantContext(
@@ -74,10 +83,8 @@ export default async function EditProductPage({
       // Three independent reads pipelined on one tx — no data dependency
       // between them. getProductWithVariants returns product + options +
       // variants in one composite call (chunk 1a.5.1, no N+1).
-      const [productWithVariants, treeResult, linkedResult] = await withTenant(
-        appDb,
-        authedCtx,
-        (tx) =>
+      const [productWithVariants, treeResult, linkedResult, imagesResult] =
+        await withTenant(appDb, authedCtx, (tx) =>
           Promise.all([
             getProductWithVariants(tx, { id: tenant.id }, role, { id }),
             listCategories(
@@ -92,8 +99,9 @@ export default async function EditProductPage({
               role,
               { productId: id },
             ),
+            listProductImages(tx, { id: tenant.id }, role, { productId: id }),
           ]),
-      );
+        );
       product = productWithVariants?.product ?? null;
       initialOptions = productWithVariants?.options ?? [];
       initialVariants =
@@ -108,6 +116,7 @@ export default async function EditProductPage({
         })) ?? [];
       categoryOptions = buildCategoryOptions(treeResult.items);
       initialCategoryIds = linkedResult.items.map((c) => c.id);
+      initialImages = imagesResult;
     } catch {
       loadError = true;
     }
@@ -183,6 +192,8 @@ export default async function EditProductPage({
             initialCategoryIds={initialCategoryIds}
             initialOptions={initialOptions}
             initialVariants={initialVariants}
+            initialImages={initialImages}
+            productUpdatedAt={product.updatedAt.toISOString()}
           />
         </div>
       </div>

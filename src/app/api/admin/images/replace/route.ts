@@ -20,6 +20,7 @@ import { runWithAudit } from "@/server/audit/run-with-audit";
 import { replaceProductImage } from "@/server/services/images/replace-product-image";
 import {
   MAX_IMAGE_UPLOAD_BYTES,
+  assertSameOriginMutation,
   classifyAuditCode,
   errorToWire,
   failureInputFromZod,
@@ -77,6 +78,9 @@ async function resolveAdminContext(req: Request): Promise<
 }
 
 export async function POST(req: Request): Promise<Response> {
+  const csrf = assertSameOriginMutation(req);
+  if (csrf) return csrf;
+
   const cl = req.headers.get("content-length");
   if (cl && Number(cl) > MAX_IMAGE_UPLOAD_BYTES) {
     return jsonError(413, { error: { code: "image_too_large" } });

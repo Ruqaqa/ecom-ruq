@@ -125,7 +125,13 @@ function buildRequest(args: {
   contentLength?: string;
   body?: BodyInit;
 }): Request {
-  const headers: Record<string, string> = { host: args.fixture.host };
+  // Default same-origin Origin header so requests pass the CSRF guard
+  // added in chunk 1a.7.2 Block 1a. CSRF-specific tests live in
+  // admin-images-csrf-guard.test.ts.
+  const headers: Record<string, string> = {
+    host: args.fixture.host,
+    origin: `http://${args.fixture.host}`,
+  };
   if (args.contentLength) headers["content-length"] = args.contentLength;
   return new Request(`http://${args.fixture.host}/api/admin/images/replace`, {
     method: "POST",

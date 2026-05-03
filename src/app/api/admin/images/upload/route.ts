@@ -30,6 +30,7 @@ import {
 } from "@/server/services/images/upload-product-image";
 import {
   MAX_IMAGE_UPLOAD_BYTES,
+  assertSameOriginMutation,
   classifyAuditCode,
   errorToWire,
   failureInputFromZod,
@@ -88,6 +89,11 @@ async function resolveAdminContext(req: Request): Promise<
 }
 
 export async function POST(req: Request): Promise<Response> {
+  // 0. Same-origin guard (CSRF). Cookie-authed mutations must come
+  // from our origin; bearer-authed PAT calls fall through.
+  const csrf = assertSameOriginMutation(req);
+  if (csrf) return csrf;
+
   // 1. Pre-parse body cap.
   const cl = req.headers.get("content-length");
   if (cl && Number(cl) > MAX_IMAGE_UPLOAD_BYTES) {

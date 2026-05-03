@@ -148,3 +148,32 @@ export function buildVariantCoverAuditSnapshot(
     newCoverImageId: input.newCoverImageId,
   };
 }
+
+/**
+ * Reorder snapshot — captures the full ordering as a bounded array of
+ * `{ imageId, position }`. NO storage keys, NO fingerprints — the
+ * forensic value is in the position-mapping, not the image content.
+ * Bounded by `MAX_PRODUCT_IMAGE_COUNT` at the input layer (Zod cap).
+ */
+export interface ReorderAuditSnapshot {
+  kind: "reorder";
+  productId: string;
+  ordering: Array<{ imageId: string; position: number }>;
+}
+
+export function buildReorderAuditSnapshot(
+  productId: string,
+  rows: ReadonlyArray<{ id: string; position: number }>,
+): ReorderAuditSnapshot {
+  // Sort by position ASC, id ASC for deterministic comparability across
+  // before/after pairs (mirrors listProductImages's sort).
+  const sorted = [...rows].sort((a, b) => {
+    if (a.position !== b.position) return a.position - b.position;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  return {
+    kind: "reorder",
+    productId,
+    ordering: sorted.map((r) => ({ imageId: r.id, position: r.position })),
+  };
+}

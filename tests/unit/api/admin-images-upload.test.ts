@@ -130,6 +130,10 @@ function buildRequest(args: {
 }): Request {
   const headers: Record<string, string> = {
     host: args.fixture.host,
+    // Default same-origin Origin header so requests pass the CSRF
+    // guard added in chunk 1a.7.2 Block 1a. Tests that need to assert
+    // CSRF behavior live in admin-images-csrf-guard.test.ts.
+    origin: `http://${args.fixture.host}`,
     ...(args.headers ?? {}),
   };
   if (args.contentLength) {

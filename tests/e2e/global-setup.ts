@@ -28,6 +28,9 @@
 import { request as playwrightRequest } from "@playwright/test";
 import Redis from "ioredis";
 import postgres from "postgres";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import sharp from "sharp";
 import { seedDevTenant } from "../../scripts/seed-dev-tenant";
 import { seedAdminUser } from "../../scripts/seed-admin-user";
 import { TEST_TOKEN_PREFIX } from "./helpers/test-token-name";
@@ -73,9 +76,32 @@ export default async function globalSetup(): Promise<void> {
       WHERE tenant_id = ${devTenantId}
         AND slug LIKE 'e2e-%'
     `;
+    // Sweep product_images that belong to e2e-prefixed products. The
+    // FK is ON DELETE CASCADE so the products sweep above already takes
+    // these out, but rows can stick around if a prior crash left an
+    // orphan; this is idempotent belt-and-braces.
+    await sql`
+      DELETE FROM product_images
+      WHERE tenant_id = ${devTenantId}
+        AND product_id NOT IN (SELECT id FROM products WHERE tenant_id = ${devTenantId})
+    `;
   } finally {
     await sql.end({ timeout: 5 });
   }
+
+  // Sweep local-disk storage for image bytes so adapter.get returns
+  // null for any orphaned keys from prior runs. Best-effort — if the
+  // dir doesn't exist, ignore.
+  try {
+    await rm(".storage/images", { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
+
+  // Generate image fixtures used by the photos admin spec. All real
+  // JPEGs (Sharp-decodable). Idempotent: the writeFile pass overwrites
+  // any partial files from a crashed prior run.
+  await ensureImageFixtures();
 
   const mailpitBase = process.env.MAILPIT_URL ?? "http://localhost:58025";
   const ctx = await playwrightRequest.newContext({ baseURL: mailpitBase });
@@ -122,5 +148,95 @@ export default async function globalSetup(): Promise<void> {
     // Swallow — Redis unavailable means auth tests will fail loudly.
   } finally {
     await redis.quit().catch(() => undefined);
+  }
+}
+
+const FIXTURES_DIR = join("tests", "e2e", "fixtures", "images");
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function makeJpegFixture(
+  path: string,
+  opts: {
+    width: number;
+    height: number;
+    rgb: { r: number; g: number; b: number };
+    quality?: number;
+  },
+): Promise<void> {
+  const buf = await sharp({
+    create: {
+      width: opts.width,
+      height: opts.height,
+      channels: 3,
+      background: opts.rgb,
+    },
+  })
+    .jpeg({ quality: opts.quality ?? 80 })
+    .toBuffer();
+  await writeFile(path, buf);
+}
+
+async function ensureImageFixtures(): Promise<void> {
+  await mkdir(FIXTURES_DIR, { recursive: true });
+
+  // Three valid 2000×2000 JPEGs with distinct color fingerprints so
+  // duplicate-fingerprint detection separates them.
+  await makeJpegFixture(join(FIXTURES_DIR, "valid-2000.jpg"), {
+    width: 2000,
+    height: 2000,
+    rgb: { r: 200, g: 100, b: 50 },
+  });
+  await makeJpegFixture(join(FIXTURES_DIR, "valid-2000-alt.jpg"), {
+    width: 2000,
+    height: 2000,
+    rgb: { r: 50, g: 200, b: 100 },
+  });
+  await makeJpegFixture(join(FIXTURES_DIR, "valid-2000-third.jpg"), {
+    width: 2000,
+    height: 2000,
+    rgb: { r: 100, g: 50, b: 200 },
+  });
+
+  // 500×500 — passes client validation (size + mime), fails server
+  // dimension check with image_too_small.
+  await makeJpegFixture(join(FIXTURES_DIR, "too-small-500.jpg"), {
+    width: 500,
+    height: 500,
+    rgb: { r: 30, g: 30, b: 30 },
+  });
+
+  // Plain text — fails client mime/extension validation.
+  const txtPath = join(FIXTURES_DIR, "not-an-image.txt");
+  if (!(await fileExists(txtPath))) {
+    await writeFile(txtPath, "this is not an image\n", "utf8");
+  }
+
+  // 12 MB JPEG. We start from a small valid JPEG header and append pad
+  // bytes after EOI — Sharp ignores trailing bytes but file.size grows.
+  // Generated only if not already present (it's 12 MB and we don't want
+  // to rewrite it on every run).
+  const bigPath = join(FIXTURES_DIR, "too-large-12mb.jpg");
+  if (!(await fileExists(bigPath))) {
+    const seed = await sharp({
+      create: {
+        width: 100,
+        height: 100,
+        channels: 3,
+        background: { r: 0, g: 0, b: 0 },
+      },
+    })
+      .jpeg({ quality: 70 })
+      .toBuffer();
+    const padSize = 12 * 1024 * 1024 - seed.length + 1024;
+    const pad = Buffer.alloc(padSize, 0);
+    await writeFile(bigPath, Buffer.concat([seed, pad]));
   }
 }
