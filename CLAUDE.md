@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Phase 0** ✅ done. **Phase 1 (catalog backbone + bilingual AI product entry)** ✅ done. **Next: Phase 2 — Storefront + commerce MVP** (local-only; no public launch).
 
-For phase detail and exit criteria, read `docs/roadmap.md`. For why specific things were deferred or relocated, read `docs/decisions.md`. For tech stack and architectural decisions, read `docs/architecture.md`. For performance / security / AI safety / data tier rules, read `docs/standards.md`. For surface-level operational guides on shipped systems (auth, audit, MCP, KEK rotation, database roles), read `docs/runbooks/` and ADRs in `docs/adr/`. Chunk-by-chunk landing history lives in `git log`.
+For phase detail and exit criteria, read `docs/roadmap.md`. For why specific things were deferred or relocated, read `docs/decisions.md`. For tech stack and architectural decisions, read `docs/architecture.md`. For performance / security / AI safety / data tier rules, read `docs/standards.md`. **For testing strategy — what we test, where it lives, what we don't bother testing — read `docs/testing.md`.** For surface-level operational guides on shipped systems (auth, audit, MCP, KEK rotation, database roles), read `docs/runbooks/` and ADRs in `docs/adr/`. Chunk-by-chunk landing history lives in `git log`.
 
 **Tracked follow-up from Phase 1:** per-worker tenant isolation for Playwright. Current per-spec slug-prefix helper is the stopgap. Architect + security explicitly deferred a deeper refactor. Pick up when admin-products spec count grows past ~6 or shared-tenant flake recurs. See `~/.claude/projects/-Users-bassel-development-ecom-ruq/memory/project_per_worker_test_isolation_followup.md`.
 
@@ -27,11 +27,11 @@ All of these work today. They are the definition of done (see Section 1):
 | `pnpm dev:setup` | One-shot fresh-machine setup: services up + migrations + seed dev tenant + seed admin fixtures |
 | `pnpm dev` | Local development server |
 | `pnpm test` | Vitest unit and integration tests |
-| `pnpm test:e2e` | Playwright end-to-end tests (mobile viewport, both locales) |
+| `pnpm test:e2e` | Playwright end-to-end tests (Tier 4 — see `docs/testing.md`) |
 | `pnpm test:e2e -- <file>` | Run a single Playwright test file |
 | `pnpm lint` | Lint check |
 | `pnpm typecheck` | TypeScript strict check |
-| `pnpm check:e2e-coverage` | Verifies every route and mutation has a referencing Playwright test |
+| `pnpm check:e2e-coverage` | Coverage lint: page routes need a Tier-4 test; tRPC mutations need a test at any tier |
 | `pnpm build` | Production build |
 
 No feature is considered done until the first six are green locally. **Until Phase 1b's Launch infrastructure block lands**, there is no hosted CI pipeline — "green" means developer-run against the local Docker Compose stack on the owner's machine. Once Launch infrastructure lands, the same commands run in the hosted pipeline and block deploys on red.
@@ -43,6 +43,7 @@ No feature is considered done until the first six are green locally. **Until Pha
 - **`prd.md`** — vision, target market, constraints, current state, pointers to the rest. Slim by design.
 - **`docs/architecture.md`** — tech stack and architectural decisions. Read before any non-trivial structural choice.
 - **`docs/standards.md`** — performance, accessibility, security, AI safety, data classification.
+- **`docs/testing.md`** — testing strategy: tiers, what goes where, what we don't test, device/language matrix, per-test budget. Canonical for all testing rules; CLAUDE.md §1 is the operational summary.
 - **`docs/roadmap.md`** — the phased plan in detail.
 - **`docs/decisions.md`** — reversed and deferred decisions, with the *why*. Read before re-litigating.
 - **`CLAUDE.md`** (this file) — operational rules for how sessions are conducted. Non-negotiable.
@@ -77,58 +78,52 @@ If any of these facts is missing on disk when you start (e.g., `.nvmrc` doesn't 
 
 ---
 
-## 1. The testing rule (non-negotiable)
+## 1. The testing rule
 
-**No frontend feature is considered done until a Playwright test exists that drives a real browser through the full user flow, in both locales, on mobile viewport, and passes in CI.**
+**Canonical strategy lives at `docs/testing.md`. Read it before writing tests; defer to it when in doubt.** This section is the operational summary.
 
-Unit and integration tests are complementary, not substitutes. "Tests pass" is not the same as "feature works" — we prove features work by exercising them as a user would.
+The shift from earlier in the project: **Tier 4 (Playwright in a real browser) is no longer the default for every user-facing change.** Tier 2 (Vitest against the real local Postgres) is the default. Tier 4 is reserved for the small set of journeys that meet the bar in `docs/testing.md` §2 — auth, the operator's golden paths, customer-facing critical flows, cross-tenant adversarial smoke. The Phase 1 target is roughly 15–20 browser specs total, not "one per feature."
 
-### What counts as a feature
+### The bar for a Tier-4 (browser) test
 
-- Any new page or route (public or admin)
-- Any new form, button action, or user-triggered mutation
-- Any auth flow (signup, login, logout, password reset, magic link, email verification)
-- Any checkout step or payment flow
-- Any admin mutation that the owner can trigger through the UI or through MCP
-- Any change that alters an existing user-facing behavior
+> "If we could only have **twenty** browser tests in this repo, would this one be in the top twenty?"
 
-### Requirements per feature
+If no, the behavior belongs in Tier 2. Full criteria in `docs/testing.md` §2.
 
-Every feature test must:
+### Requirements when a Tier-4 test IS written
 
-1. **Run a real browser** via Playwright (no mocking the browser layer).
-2. **Cover happy path + at least one critical error case** (e.g., wrong password, out-of-stock, invalid card).
-3. **Run on mobile viewport by default** — the default Playwright projects are iPhone 14 and Pixel 7. Desktop is a secondary project. If the mobile test does not pass, the feature is not done.
-4. **Run in both `en` and `ar`** locales via parameterized Playwright projects. This catches RTL regressions immediately.
-5. **Include an `axe` accessibility assertion** on the key pages the test touches (`@axe-core/playwright`). Ties into the WCAG 2.1 AA NFR.
-6. **Complete in under 30 seconds.** If a test is slow, profile and fix — do not accept slow-by-default tests.
-7. **Be deterministic.** No flaky retries. If a test flakes, quarantine it and fix the root cause within 24 hours. Do not add `test.retry()` to mask flakes.
+1. Real browser via Playwright (no mocking the browser layer).
+2. Happy path + at least one critical error case.
+3. Diagonal device/locale matrix per `docs/testing.md` §4: one phone × English, one phone × Arabic. Drop inner `for (locale of ["en","ar"])` loops — the project pins a locale.
+4. Accessibility assertion **once per distinct visual page**, not per test.
+5. Hard cap: 30 seconds per test. A slow test must be fixed, not given a bigger timeout.
+6. Deterministic — no `test.retry()` to mask flake. Quarantine + root-cause within 24 h.
 
 ### Real-world dependency handling
 
-- **Email flows** (password reset, magic link, email verification, order confirmation): use Mailpit. Trigger the email, poll the Mailpit HTTP API for the message, parse the link out of the HTML, follow it in the browser, verify the downstream state. Do not stub `sendEmail`.
-- **Payments:** use Moyasar test mode with real test cards. Fill the real checkout form; submit real test cards. Replay webhooks via Playwright's `request` API.
-- **External APIs** (ZATCA, Nafath, Unifonic, BunnyCDN): intercept at the Playwright network layer. Contract correctness is separately verified by integration tests (Vitest) against each vendor's sandbox.
-- **Time-dependent logic:** use Playwright's `clock` API for determinism.
+- **Email flows:** Mailpit poll-and-parse, real round-trip. Do not stub `sendEmail`.
+- **Payments:** Moyasar test mode with real test cards. Replay webhooks via Playwright's `request` API.
+- **External APIs** (ZATCA, Nafath, Unifonic, BunnyCDN): intercept at the Playwright network layer. Contract correctness is verified at Tier 2 / Tier 3 against each vendor's sandbox.
+- **Time-dependent logic:** Playwright's `clock` API.
 
 ### Test data isolation
 
-- Tests run against a dedicated `test` tenant with seeded fixtures.
+- Tier-4 runs against a dedicated `test` tenant with seeded fixtures.
 - Tenant-scoped tables are truncated and re-seeded **before each test run**, not per test.
 - Parallel workers are scoped by a tenant suffix so they do not collide.
 - Never depend on mutable state leaking between tests.
 
 ### Definition of done
 
-Before reporting any task as complete, you must:
+A feature is done when:
 
-1. Run `pnpm test:e2e` and confirm it is green.
-2. Run `pnpm test` (Vitest) and confirm it is green.
-3. Run `pnpm lint` and `pnpm typecheck` and confirm clean.
-4. Run `pnpm check:e2e-coverage` — the coverage lint script that asserts every Next.js route and every tRPC mutation has at least one referencing Playwright test. If it fails, add the missing test.
-5. If Lighthouse CI is configured for the touched pages, confirm budgets are met locally.
+1. `pnpm typecheck` and `pnpm lint` are clean.
+2. `pnpm test` (Tier 2 / Tier 3) is green.
+3. `pnpm check:e2e-coverage` is green. The lint requires page routes to have a Tier-4 test; tRPC mutations are satisfied by **any** tier (see `docs/testing.md` §7).
+4. **If** the feature meets the Tier-4 bar, the relevant `pnpm test:e2e` spec is green for the matrix in `docs/testing.md` §4.
+5. If it does not meet the Tier-4 bar, Tier-2 coverage (and Tier-3 where appropriate) is sufficient. Tier-4 is **not** a default requirement.
 
-"Done" means all five of these are green locally and in CI. Do not report a task as complete based on code inspection alone.
+Do not report a task as complete based on code inspection alone.
 
 ---
 

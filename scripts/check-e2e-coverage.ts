@@ -1,9 +1,20 @@
 #!/usr/bin/env tsx
 /**
- * Fails if any Next.js route or tRPC mutation is not referenced by at least
- * one Playwright test. Referenced = the route path (or mutation name) appears
- * as a substring in some `tests/e2e/**\/*.spec.ts` file. This is a lint, not
- * a proof — the real guarantee is CLAUDE.md §1 discipline.
+ * Coverage lint. Two distinct rules — see docs/testing.md §7:
+ *
+ *   - Page routes (src/app/**\/page.tsx) MUST appear as a substring in
+ *     some tests/e2e/**\/*.spec.ts. Pages are user-visible by definition;
+ *     their coverage requires a Tier-4 (browser) test.
+ *
+ *   - tRPC mutations MUST appear as a substring in ANY test source —
+ *     tests/e2e, tests/unit, or tests/integration. Tier-2 / Tier-3
+ *     coverage is sufficient. The earlier rule of "every mutation needs
+ *     a Playwright test" caused the slow tier to grow unboundedly; the
+ *     new rule lets internal mutations satisfy coverage at the cheap
+ *     tier (where they belong) while preserving the lint's spirit.
+ *
+ * This is a substring lint, not a proof — real coverage discipline lives
+ * in docs/testing.md and the TDD agent definition.
  */
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -15,6 +26,8 @@ const APP_DIR = path.join(ROOT, "src", "app");
 const TRPC_DIR = path.join(ROOT, "src", "server", "trpc");
 const SRC_DIR = path.join(ROOT, "src");
 const E2E_DIR = path.join(ROOT, "tests", "e2e");
+const UNIT_DIR = path.join(ROOT, "tests", "unit");
+const INTEGRATION_DIR = path.join(ROOT, "tests", "integration");
 
 /**
  * Closed-set keys allowed in the `after` payload of an `auth.*` audit
@@ -159,6 +172,24 @@ async function collectTrpcMutations(): Promise<string[]> {
 async function loadAllE2ESources(): Promise<string> {
   const files = (await walk(E2E_DIR)).filter((f) => /\.spec\.(ts|tsx)$/.test(f));
   const contents = await Promise.all(files.map((f) => readFile(f, "utf8")));
+  return contents.join("\n");
+}
+
+/**
+ * The mutation-coverage haystack: e2e specs + unit + integration test
+ * sources. Per docs/testing.md §7, a tRPC mutation can be covered at
+ * any tier — the earlier "must appear in a Playwright spec" rule
+ * pushed work into the slow tier unnecessarily.
+ */
+async function loadAllTestSources(): Promise<string> {
+  const e2eFiles = (await walk(E2E_DIR)).filter((f) => /\.spec\.(ts|tsx)$/.test(f));
+  const unitFiles = (await walk(UNIT_DIR)).filter((f) => /\.test\.(ts|tsx)$/.test(f));
+  const integrationFiles = (await walk(INTEGRATION_DIR)).filter((f) =>
+    /\.test\.(ts|tsx)$/.test(f),
+  );
+  const contents = await Promise.all(
+    [...e2eFiles, ...unitFiles, ...integrationFiles].map((f) => readFile(f, "utf8")),
+  );
   return contents.join("\n");
 }
 
@@ -421,7 +452,8 @@ async function main() {
   const [
     routes,
     mutations,
-    haystack,
+    e2eHaystack,
+    allTestsHaystack,
     publicMutationViolations,
     authAfterViolations,
     rawDeleteViolations,
@@ -430,6 +462,7 @@ async function main() {
     collectRoutes(),
     collectTrpcMutations(),
     loadAllE2ESources(),
+    loadAllTestSources(),
     checkNoPublicMutations(),
     checkAuthAuditAfterShape(),
     checkNoRawAccessTokenDeletes(),
@@ -466,8 +499,12 @@ async function main() {
     process.exit(1);
   }
 
-  const uncoveredRoutes = routes.filter((r) => !routeReferenced(r, haystack));
-  const uncoveredMutations = mutations.filter((m) => !mutationReferenced(m, haystack));
+  // Page routes: must be covered by a Tier-4 (browser) test — pages are
+  // user-visible by definition.
+  const uncoveredRoutes = routes.filter((r) => !routeReferenced(r, e2eHaystack));
+  // tRPC mutations: covered if mentioned in ANY test source (Tier 2,
+  // Tier 3, or Tier 4). See docs/testing.md §7.
+  const uncoveredMutations = mutations.filter((m) => !mutationReferenced(m, allTestsHaystack));
 
   console.log(`Routes discovered: ${routes.length}`);
   for (const r of routes) console.log(`  ${r}`);
@@ -475,44 +512,54 @@ async function main() {
   for (const m of mutations) console.log(`  ${m}`);
 
   if (uncoveredRoutes.length === 0 && uncoveredMutations.length === 0) {
-    console.log("\nAll routes and mutations have at least one referencing Playwright test.");
+    console.log(
+      "\nAll page routes have a Tier-4 test, and all tRPC mutations have a test at some tier.",
+    );
     return;
   }
 
   if (uncoveredRoutes.length) {
-    console.error("\nRoutes without a referencing Playwright test:");
+    console.error("\nPage routes without a Tier-4 (Playwright) test:");
     for (const r of uncoveredRoutes) console.error(`  ${r}`);
   }
 
   // Dev-only escape hatch. Default behavior is STRICT — missing
   // mutation coverage fails the script. A local developer who is
-  // actively writing a mutation and hasn't finished the Playwright
-  // test yet can set `DEV_ONLY_ALLOW_MISSING_MUTATION_TESTS=1` to
-  // downgrade to a warning. CI hard-refuses this flag (see top of
-  // main()), and the name signals "do not set in real life."
+  // actively writing a mutation and hasn't finished the test yet can
+  // set `DEV_ONLY_ALLOW_MISSING_MUTATION_TESTS=1` to downgrade to a
+  // warning. CI hard-refuses this flag (see top of main()), and the
+  // name signals "do not set in real life."
   const allowMissingMutations =
     process.env.DEV_ONLY_ALLOW_MISSING_MUTATION_TESTS === "1";
 
   if (uncoveredMutations.length && allowMissingMutations) {
     console.warn(
-      "\n[WARN] tRPC mutations without a referencing Playwright test (allowed by DEV_ONLY_ALLOW_MISSING_MUTATION_TESTS):",
+      "\n[WARN] tRPC mutations without any test reference (allowed by DEV_ONLY_ALLOW_MISSING_MUTATION_TESTS):",
     );
     for (const m of uncoveredMutations) console.warn(`  ${m}`);
   } else if (uncoveredMutations.length) {
-    console.error("\ntRPC mutations without a referencing Playwright test:");
+    console.error(
+      "\ntRPC mutations without any test reference (Tier 2 / Tier 3 / Tier 4):",
+    );
     for (const m of uncoveredMutations) console.error(`  ${m}`);
   }
 
   const hardFail = uncoveredRoutes.length > 0 || (uncoveredMutations.length > 0 && !allowMissingMutations);
   if (!hardFail) {
     if (uncoveredMutations.length === 0) {
-      console.log("\nAll routes and mutations have at least one referencing Playwright test.");
+      console.log(
+        "\nAll page routes have a Tier-4 test, and all tRPC mutations have a test at some tier.",
+      );
     } else {
-      console.log("\nAll routes have at least one referencing Playwright test (mutation gaps tolerated by env flag).");
+      console.log(
+        "\nAll page routes have a Tier-4 test (mutation gaps tolerated by env flag).",
+      );
     }
     return;
   }
-  console.error("\nAdd a Playwright test that exercises each missing path (CLAUDE.md §1).");
+  console.error(
+    "\nAdd a test for each missing path. Tier policy: pages need Tier 4; mutations need any tier (docs/testing.md §7).",
+  );
   process.exit(1);
 }
 
