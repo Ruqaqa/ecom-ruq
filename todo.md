@@ -10,3 +10,4 @@
     - Silly tests that are not needed and wasting testing time. Perhaps set rules for writing future tests.
 - Enhance how agents teams are created and enhance the flow. e.g. /simplify skill usage.
 - Set rule to use simplify skill once a chunk implemented before commiting.
+- Create skill to move foreward to next session, including how to update prd, memory, claude.md, docs, commit and push etc.
