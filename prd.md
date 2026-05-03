@@ -50,7 +50,7 @@ The platform is the **source of truth** for products, inventory, and orders — 
 
 - **Package manager:** **pnpm** (locked). All scripts run via `pnpm <script>`. `npm` and `yarn` are not used.
 - **Node runtime:** **Node 22.x LTS**, pinned in `.nvmrc` and `package.json > engines`.
-- **Repository structure:** **Single Next.js application** (not a monorepo) for Phase 0 through Phase 8. A monorepo split (pnpm workspaces + Turborepo) is deferred to "Phase 50" when a native mobile app is built — at that point the existing Next.js app becomes one workspace and the RN app a second. Until then, one `package.json`, one `tsconfig.json`, one Next.js project at the repo root.
+- **Repository structure:** **Single Next.js application** (not a monorepo) for Phase 0 through Phase 11. A monorepo split (pnpm workspaces + Turborepo) is deferred to "Phase 50" when a native mobile app is built — at that point the existing Next.js app becomes one workspace and the RN app a second. Until then, one `package.json`, one `tsconfig.json`, one Next.js project at the repo root.
 - **Source layout:** `src/app/` (Next.js routes), `src/server/services/` (typed service layer), `src/server/trpc/` (tRPC routers), `src/server/mcp/` (MCP server), `src/server/db/` (Drizzle schema + migrations), `src/lib/` (shared utilities), `src/i18n/` (locale catalogs), `tests/e2e/` (Playwright), `tests/unit/` (Vitest), `scripts/` (CI helpers including `check-e2e-coverage.ts`).
 - **Git workflow:** Solo → push-to-main with CI gate. No PR-based review. CI must be green before Coolify auto-deploys. Feature branches are optional and used only for work that spans multiple commits without being shippable mid-way.
 - **Environments:** Three environments — `local` (developer machine + Docker Compose), `staging` (Coolify app on Hetzner, seeded with a `staging` tenant), `production` (Coolify app on Hetzner, real tenants on real domains). Staging is where autonomous agents and destructive AI tools are exercised before being pointed at production.
@@ -133,7 +133,7 @@ The platform is the **source of truth** for products, inventory, and orders — 
 - **Arabic typography:** IBM Plex Sans Arabic or Tajawal loaded via `next/font`. Latin typography: Inter via `next/font`.
 - **Arabic slugs:** Allow real Arabic in URLs (Google indexes them correctly). Product slugs are per-locale: `/en/products/sony-a7iv` ↔ `/ar/products/سوني-a7iv`.
 - **hreflang:** Emit `hreflang="ar-SA"` and `hreflang="en-SA"` + `x-default` on every public page.
-- **Locale fallback policy:** Content fields (product name, description, page copy, etc.) are stored per-locale in JSONB. When a field is missing in the requested locale, the public storefront **falls back to the other locale silently** — the shopper always sees something, never a broken placeholder. The admin UI, by contrast, **surfaces missing translations explicitly** with a visible badge so the owner knows what still needs translating. **The fallback is a safety net, not a launch strategy:** the platform launches bilingually in Phase 1b, with every seeded and live product carrying both `ar` and `en` content. The fallback exists to handle individual missing fields gracefully (e.g., a newly added product where the owner hasn't yet filled in one locale) — not to ship a half-translated experience.
+- **Locale fallback policy:** Content fields (product name, description, page copy, etc.) are stored per-locale in JSONB. When a field is missing in the requested locale, the public storefront **falls back to the other locale silently** — the shopper always sees something, never a broken placeholder. The admin UI, by contrast, **surfaces missing translations explicitly** with a visible badge so the owner knows what still needs translating. **The fallback is a safety net, not a launch strategy:** the platform launches bilingually in Phase 6, with every seeded and live product carrying both `ar` and `en` content. The fallback exists to handle individual missing fields gracefully (e.g., a newly added product where the owner hasn't yet filled in one locale) — not to ship a half-translated experience.
 
 ### 3.3 Product variants (option-driven, industry-standard)
 
@@ -169,7 +169,7 @@ Baked in from Phase 0:
 ### 3.5 Compliance foundations
 
 - **PDPL:** cookie consent banner, data export endpoint, data deletion endpoint, audit log for sensitive field access. Raw national IDs (when Nafath lands) stored encrypted at rest.
-- **ZATCA:** invoice schema designed from day one with all required fields (seller/buyer VAT numbers, invoice hash chain, QR code payload). Actual API integration is Phase 6, but data model is Phase 0.
+- **ZATCA:** invoice schema designed from day one with all required fields (seller/buyer VAT numbers, invoice hash chain, QR code payload). Actual API integration is Phase 4, but data model is Phase 0.
 - **VAT:** 15% KSA, 5% UAE — region-aware tax engine from the start, even if only KSA is used initially.
 
 ### 3.6 Tenancy & auth interaction
@@ -279,7 +279,7 @@ This rule is non-negotiable because the codebase is AI-built. Without real brows
 
 **AI involvement in testing:**
 - Claude Code writes Playwright tests as part of every feature, using the service layer's Zod schemas for typed inputs.
-- **Test triage agent** (Phase 4+): when a test fails in CI, an agent reads the failure + changed diff + screenshot and posts a root-cause analysis. Human confirms the fix.
+- **Test triage agent** (Phase 3+): when a test fails in CI, an agent reads the failure + changed diff + screenshot and posts a root-cause analysis. Human confirms the fix.
 - **Exploratory agent** (Phase 8): optional Claude agent that drives Playwright in free-form mode to hunt for bugs not covered by scripted tests.
 
 ---
@@ -292,7 +292,7 @@ Each phase ends with a clear deliverable. Phase 0 is foundation; Phase 1 onward 
 
 Claude Code can automate almost everything, but it cannot create accounts or prove your identity to third parties. Before a fresh Claude session starts Phase 0, the owner must have the following in hand. Claude should ask for any of these values it needs and should halt rather than guess.
 
-> **Note on phasing.** Phase 0 is scoped to **local-only foundation** work — no production host, no CI pipeline, no CDN, no error-monitoring DSN. Of the items below, only the **GitHub repo + PAT**, **Anthropic API key**, and **local dev machine** are strictly blocking for Phase 0. The **Hetzner Cloud account**, **Sentry DSN**, **domain registration**, and **launch domain names** are only required when the **Launch infrastructure** block (at the top of Phase 1b) is scheduled, which is closer to first public launch. The other hosting-related items in the "deferred but worth starting paperwork" table (Moyasar, Resend, Unifonic, BunnyCDN, ZATCA, Nafath, Apple Developer) are needed by the phase each row notes and are not blockers for Phase 0 or Launch infrastructure unless called out there.
+> **Note on phasing.** Phase 0 is scoped to **local-only foundation** work — no production host, no CI pipeline, no CDN, no error-monitoring DSN. Of the items below, only the **GitHub repo + PAT**, **Anthropic API key**, and **local dev machine** are strictly blocking for Phase 0. The **Hetzner Cloud account**, **Sentry DSN**, **domain registration**, and **launch domain names** are only required when **Phase 6 (Launch infrastructure + go live)** is scheduled, which is closer to first public launch. The other hosting-related items in the "deferred but worth starting paperwork" table (Moyasar, Resend, Unifonic, BunnyCDN, ZATCA, Nafath, Apple Developer) are needed by the phase each row notes and are not blockers for Phase 0 or Phase 6 unless called out there.
 
 **Accounts and credentials (required to start Phase 0):**
 
@@ -303,24 +303,24 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 | Anthropic (Claude) API key | All AI features from day zero | `ANTHROPIC_API_KEY` |
 | Sentry account (free tier) | Error observability | Project DSN |
 | A registered domain + DNS provider access | Custom domains per tenant | Registrar credentials or API access (Cloudflare recommended for DNS + WAF) |
-| **Two domain names chosen** for the main tenant and the sister tenant | Launch infrastructure (top of Phase 1b) wires at least one into Traefik/Coolify | The actual strings (e.g., `brand-a.com`, `brand-b.com`) |
+| **Two domain names chosen** for the main tenant and the sister tenant | Phase 6 (Launch infrastructure + go live) wires at least one into Traefik/Coolify | The actual strings (e.g., `brand-a.com`, `brand-b.com`) |
 | A local machine with Docker, pnpm, and Node 22 LTS installed | Running the dev loop and Playwright locally | — |
 
 **Accounts deferred but worth starting the paperwork for (can be collected later):**
 
 | Item | Needed by | Notes |
 |---|---|---|
-| Moyasar merchant account | Phase 2 (commerce MVP) | Requires a Saudi Commercial Registration (CR). **Start the application early — it is the slowest prerequisite on the path to first revenue.** Test mode works without approval. |
+| Moyasar merchant account | Phase 5 (KSA payments — first revenue) | Requires a Saudi Commercial Registration (CR). **Start the application early — it is the slowest prerequisite on the path to first revenue.** Test mode works without approval. |
 | Resend account + domain verification per tenant | Phase 2 (transactional email) | DKIM records must be added per tenant domain |
 | Unifonic account | Phase 2 (SMS/OTP) | KSA-based provider, CR-friendly |
 | BunnyCDN account | Phase 1 (media delivery) | Storage zone + pull zone per tenant |
-| ZATCA Fatoora portal registration | Phase 6 (e-invoicing) | Requires CR and VAT number; plan to start paperwork in Phase 4 |
-| Nafath aggregator agreement (IAMX, Elm, or equivalent) | Phase 7 (identity verification) | 4–6 week lead time; start during Phase 5 |
-| Apple Developer account | Phase 7 (Apple Pay domain verification) | Not needed before checkout goes live |
+| ZATCA Fatoora portal registration | Phase 4 (e-invoicing) | Requires CR and VAT number; plan to start paperwork in Phase 2 |
+| Nafath aggregator agreement (IAMX, Elm, or equivalent) | Phase 7 (identity verification) | 4–6 week lead time; start during Phase 4 |
+| Apple Developer account | Phase 5 (Apple Pay domain verification) | Needed when Moyasar wires real payments in Phase 5 |
 
 **Decisions the owner must make before Phase 0:**
 
-1. **The two launch domain names.** Phase 5 launches both; the Launch infrastructure block inside Phase 1b needs at least one real name to wire into Coolify. Placeholders are acceptable for local dev but production domains must be real before Phase 1b's public URL goes live, and both before Phase 5.
+1. **The two launch domain names.** Phase 11 launches both; the Launch infrastructure block (Phase 6) needs at least one real name to wire into Coolify. Placeholders are acceptable for local dev but production domains must be real before Phase 6's public URL goes live, and both before Phase 11.
 2. **Company legal entity / CR number** for KSA compliance (used for VAT, ZATCA, Moyasar onboarding).
 3. **Admin email address** for the first owner account and for Sentry / Resend / Hetzner notifications.
 4. **Slack or email channel** where daily digests and agent alerts will land.
@@ -329,7 +329,7 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 **What Claude Code will do in the first Phase 0 session:**
 
 1. Read `prd.md` and `CLAUDE.md` fully.
-2. Ask the owner for the values in the tables above that are needed *right now* (GitHub repo + PAT, Claude API key, local dev machine details). Defer Hetzner, Sentry, and production domain names until the Launch infrastructure block of Phase 1b.
+2. Ask the owner for the values in the tables above that are needed *right now* (GitHub repo + PAT, Claude API key, local dev machine details). Defer Hetzner, Sentry, and production domain names until Phase 6 (Launch infrastructure + go live).
 3. Store local-dev secrets in `.env.local` (gitignored); production secrets land in Coolify / GitHub Actions only when Launch infrastructure is scheduled.
 4. Halt on anything it cannot obtain, explaining exactly what is missing.
 
@@ -337,9 +337,9 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 
 ### Phase 0 — Foundation (not shippable, local-only)
 
-**Goal:** Local-runnable foundation — schema, auth skeleton, AI primitives, service-layer API, tenant isolation, testing harness, and observability prep. Nothing is deployed to a public host. The production VM, CI pipeline, CDN, and error-monitoring wiring live in the **Launch infrastructure** block at the top of Phase 1b, which ships closer to first public launch. Phase 0 is fully solo-developable on a laptop against local Docker Compose; its checks run locally and gate commits via developer discipline rather than a hosted CI pipeline.
+**Goal:** Local-runnable foundation — schema, auth skeleton, AI primitives, service-layer API, tenant isolation, testing harness, and observability prep. Nothing is deployed to a public host. The production VM, CI pipeline, CDN, and error-monitoring wiring live in **Phase 6 (Launch infrastructure + go live)**, which ships closer to first public launch. Phase 0 is fully solo-developable on a laptop against local Docker Compose; its checks run locally and gate commits via developer discipline rather than a hosted CI pipeline.
 
-**Why split this way (rationale, 2026-04-23):** at Phase 0 close, there is one developer, no production host, no staff, and no customers. A hosted CI pipeline and Coolify deploy webhook have no target to point at and no second set of hands whose pushes they would guard. The two pieces of the original "deploy pipeline" goal that are genuinely load-bearing today — error-log scrubbing (so that customer identifiers never leak into logs, before any error-monitoring DSN is wired) and boot-time production-safety guards (so that a misconfigured production env cannot start) — are kept in Phase 0. The rest (Hetzner VM, Coolify, CI workflow, Sentry DSN, Lighthouse CI enforcement, CDN, backups, uptime monitoring) moves to Launch infrastructure and lands in one coordinated pass before Phase 1b's public URL goes live.
+**Why split this way (rationale, 2026-04-23):** at Phase 0 close, there is one developer, no production host, no staff, and no customers. A hosted CI pipeline and Coolify deploy webhook have no target to point at and no second set of hands whose pushes they would guard. The two pieces of the original "deploy pipeline" goal that are genuinely load-bearing today — error-log scrubbing (so that customer identifiers never leak into logs, before any error-monitoring DSN is wired) and boot-time production-safety guards (so that a misconfigured production env cannot start) — are kept in Phase 0. The rest (Hetzner VM, Coolify, CI workflow, Sentry DSN, Lighthouse CI enforcement, CDN, backups, uptime monitoring) moves to Phase 6 and lands in one coordinated pass when the public URL goes live.
 
 **Work:**
 
@@ -381,13 +381,15 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 
 ---
 
-### Phase 1a — Catalog backbone + bilingual AI product entry (not shippable, internal milestone)
+### Phase 1 — Catalog backbone + bilingual AI product entry ✅ Done (formerly Phase 1a)
 
 **Goal:** The owner can create and manage fully bilingual products end-to-end — via the admin UI and via Claude. The public storefront does not exist yet; this phase exists to prove the bilingual content pipeline before any public traffic sees it.
 
-**Already landed in Phase 0 (chunks 6 & 7):** `createProduct` service + tRPC + MCP (`create_product`) wired end-to-end through the adapter audit middleware, and the `/{locale}/admin/products/new` admin create form gated by `requireMembership(['owner','staff'])` with the RSC guard at `src/app/[locale]/admin/layout.tsx`. Phase 1a picks up from there — the remaining CRUD, the bilingual content model, the image pipeline, the catalog MCP surface, and the AI assist panel.
+**Status (2026-05-03): completed.** Sub-chunk history below is preserved for traceability; chunk-by-chunk landing notes (commit dates, follow-ups) live in git log and CLAUDE.md. Sub-chunk identifiers (1a.1, 1a.2, …) keep their historical "1a." prefix to match commit messages and runbooks; the phase itself is now Phase 1.
 
-**Chunking:** Phase 1a is broken into small chunks; each chunk is scoped so an agent team can land it in a single session (service + transport + admin UI + Playwright in both locales on mobile + vitest + coverage lint). Chunk-level progress lives in `CLAUDE.md`. The sequence below is the intended landing order.
+**Already landed in Phase 0 (chunks 6 & 7):** `createProduct` service + tRPC + MCP (`create_product`) wired end-to-end through the adapter audit middleware, and the `/{locale}/admin/products/new` admin create form gated by `requireMembership(['owner','staff'])` with the RSC guard at `src/app/[locale]/admin/layout.tsx`. Phase 1 picks up from there — the remaining CRUD, the bilingual content model, the image pipeline, the catalog MCP surface, and the AI assist panel.
+
+**Chunking:** Phase 1 was broken into small chunks; each chunk was scoped so an agent team could land it in a single session (service + transport + admin UI + Playwright in both locales on mobile + vitest + coverage lint). Chunk-level progress lives in `CLAUDE.md`. The sequence below is the landing order.
 
 **Work:**
 
@@ -396,9 +398,9 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
 - **1a.2 — Edit a product.** `updateProduct` service + tRPC mutation + `update_product` MCP tool + admin edit form reached from the list row. Bilingual field pair polished during this chunk.
 - **1a.3 — Soft-delete a product.** `deleteProduct` service + tRPC mutation + `delete_product` MCP tool (`confirm: true` required) + admin delete action with a recovery window. Hard-delete is a separate gated operation, out of scope here.
 - **1a.4 — Category management.** Categories form a single tree with one parent per category, depth capped at three levels (categories may be shallower). Products are many-to-many with categories from day one (a product can live under several categories — matches Shopify/Amazon/Sweetwater shape). Each category has a single Latin slug shared across both locales (the owner chose Latin URLs over Arabic-script URLs for share-ability; bilingual `name`/`description` still apply). Three sub-chunks land in order: **1a.4.1** services + tRPC + MCP (`list_categories`, `create_category`, `update_category`) with depth/cycle/slug-uniqueness guards, no UI. **1a.4.2** admin list/create/edit pages mirroring the products admin UX, plus a multi-select category picker on the product edit form. **1a.4.3** soft-delete + restore + owner-only hard-purge sweeper mirroring 1a.3 — soft-deleting a parent cascades to descendants in the same transaction, and restoring a child whose parent is still removed is refused.
-- **1a.5 — Variants.** Operator tooling for defining option types and managing variants (SKUs, prices, stock) per product; the data layer is partially in place via `product_options` / `product_option_values` / `product_variants` from Phase 0. Caps from §3.3 (≤3 option types per product, ≤100 variants per product) are enforced at the data layer. Per-variant cover photos wait for 1a.7's image pipeline (until then variants share the parent product's photos). Per-tenant **specifications + catalogue filters** are their own later chunk and do not block this work. The customer-facing variant **picker** (visible buttons, colour swatches, image swap, sticky add-to-cart, sold-out greying — per Baymard's product-page UX research and the patterns Shopify/Amazon/Apple/Sonos converge on) lands as part of Phase 1b's product detail page work; it cannot exist before there is a public product detail page. Three sub-chunks land in order: **1a.5.1** services + tRPC + MCP — `setProductOptions`, `setProductVariants`, `getProductWithVariants`; MCP tools `set_product_options` / `set_product_variants` (non-destructive set-replace, no `confirm: true`) — with Zod-enforced validation (≤3 options, ≤100 variants, no duplicate combinations, SKU uniqueness within tenant, price ≥ 0, stock ≥ 0), OCC on the parent product, and a per-tenant advisory lock during the variant-set diff to serialize concurrent edits to the same product. No UI. **1a.5.2** admin UX core — on the product edit page, an Options panel (add option types, add values per option) and a Variants grid (auto-generated from the cartesian product of the option values, per-row inline editing of SKU/price/stock); single-variant default mode (no options defined → simple SKU/price/stock form, not a grid); mobile-first list-style editor rather than a desktop data grid; both locales. **1a.5.3** admin UX polish — bulk select + apply price/stock to multiple rows; remove individual variant rows (hard delete; no soft-delete recovery for individual variant rows since the parent product's soft-delete already covers broader mistakes); remove an option type with cascade warning showing the live count of variant rows that will be removed; cap-hit pre-save error when defining options would generate more than 100 combinations; inline error messages for duplicate SKUs and out-of-range values.
-- **1a.6 — Bilingual content polish + missing-translation badge. *Deferred 2026-05-02 to a post-must-have polish pass.*** The JSONB `{ en, ar }` input pair already ships on products / variants / categories from 1a.2 onward; the deferred scope is just the badge UI surface (per-field "missing translation" indicator) and a "show only items missing Arabic" filter on admin lists. Reason for deferring: pre-launch, solo operator, small catalog — the badge mostly tells the owner what they already know. Revisit when the catalog is large enough that the badge actually saves time, after images (1a.7), storefront (Phase 1b), and checkout/payments are in.
-- **1a.7 — Image pipeline.** Photo upload, storage, processing, and admin tooling for products and variants. **Storage layer is swappable from day one** — a small adapter interface (`put` / `get` / `delete` / `list`) with two implementations: a **local-disk backend** for dev/test and a **BunnyCDN Storage Zone backend** for production. The implementation is selected by env config; no code change is required to flip backends. This avoids a migration step at Phase 1b launch and is forward-compatible with video (same vendor; short clips ride the same backend, longer content can use BunnyCDN Stream when we add it). The production Storage Zone + Pull Zone are provisioned inside Phase 1b's Launch infrastructure block; the adapter interface itself ships in 1a.7. Customer-facing photo rendering (gallery, swipe carousel, pinch-to-zoom, variant-aware refresh, OG meta tags, Product JSON-LD `image` field, browser priority/lazy hints) is Phase 1b's product detail page work — 1a.7 stops at "the data, the URLs, the derived sizes, the storage adapter, and the admin tooling exist". 1a.7 produces everything Phase 1b needs to render correctly; Phase 1b wires it into the storefront markup.
+- **1a.5 — Variants.** Operator tooling for defining option types and managing variants (SKUs, prices, stock) per product; the data layer is partially in place via `product_options` / `product_option_values` / `product_variants` from Phase 0. Caps from §3.3 (≤3 option types per product, ≤100 variants per product) are enforced at the data layer. Per-variant cover photos wait for 1a.7's image pipeline (until then variants share the parent product's photos). Per-tenant **specifications + catalogue filters** are their own later chunk and do not block this work. The customer-facing variant **picker** (visible buttons, colour swatches, image swap, sticky add-to-cart, sold-out greying — per Baymard's product-page UX research and the patterns Shopify/Amazon/Apple/Sonos converge on) lands as part of Phase 2's product detail page work; it cannot exist before there is a product detail page. Three sub-chunks land in order: **1a.5.1** services + tRPC + MCP — `setProductOptions`, `setProductVariants`, `getProductWithVariants`; MCP tools `set_product_options` / `set_product_variants` (non-destructive set-replace, no `confirm: true`) — with Zod-enforced validation (≤3 options, ≤100 variants, no duplicate combinations, SKU uniqueness within tenant, price ≥ 0, stock ≥ 0), OCC on the parent product, and a per-tenant advisory lock during the variant-set diff to serialize concurrent edits to the same product. No UI. **1a.5.2** admin UX core — on the product edit page, an Options panel (add option types, add values per option) and a Variants grid (auto-generated from the cartesian product of the option values, per-row inline editing of SKU/price/stock); single-variant default mode (no options defined → simple SKU/price/stock form, not a grid); mobile-first list-style editor rather than a desktop data grid; both locales. **1a.5.3** admin UX polish — bulk select + apply price/stock to multiple rows; remove individual variant rows (hard delete; no soft-delete recovery for individual variant rows since the parent product's soft-delete already covers broader mistakes); remove an option type with cascade warning showing the live count of variant rows that will be removed; cap-hit pre-save error when defining options would generate more than 100 combinations; inline error messages for duplicate SKUs and out-of-range values.
+- **1a.6 — Bilingual content polish + missing-translation badge. *Relocated 2026-05-03 to Phase 9 (Bilingual AI hardening + RTL polish).*** The JSONB `{ en, ar }` input pair already ships on products / variants / categories from 1a.2 onward; the relocated scope is just the badge UI surface (per-field "missing translation" indicator) and a "show only items missing Arabic" filter on admin lists. Reason for the move: pre-launch, solo operator, small catalog — the badge mostly tells the owner what they already know, so it doesn't justify holding Phase 1 open. The badge naturally lives with the rest of the bilingual hardening pass in Phase 9.
+- **1a.7 — Image pipeline.** Photo upload, storage, processing, and admin tooling for products and variants. **Storage layer is swappable from day one** — a small adapter interface (`put` / `get` / `delete` / `list`) with two implementations: a **local-disk backend** for dev/test and a **BunnyCDN Storage Zone backend** for production. The implementation is selected by env config; no code change is required to flip backends. This avoids a migration step at Phase 6 launch and is forward-compatible with video (same vendor; short clips ride the same backend, longer content can use BunnyCDN Stream when we add it). The production Storage Zone + Pull Zone are provisioned in Phase 6 (Launch infrastructure + go live); the adapter interface itself ships in 1a.7. Customer-facing photo rendering (gallery, swipe carousel, pinch-to-zoom, variant-aware refresh, OG meta tags, Product JSON-LD `image` field, browser priority/lazy hints) is Phase 2's product detail page work — 1a.7 stops at "the data, the URLs, the derived sizes, the storage adapter, and the admin tooling exist". 1a.7 produces everything Phase 2 needs to render correctly; Phase 2 wires it into the storefront markup.
 
   *Acceptance rules on upload (validated server-side, client claims are not trusted):*
   - Accepted formats: JPEG, PNG, WebP.
@@ -452,62 +454,44 @@ Claude Code can automate almost everything, but it cannot create accounts or pro
   - **1a.7.3** per-variant cover assignment + mobile polish + e2e coverage in both locales on mobile viewport.
 
   *Explicitly deferred to later phases (do not build now):*
-  - **Per-variant photo *galleries*** (multiple photos per variant, not just a single cover). Foundation supports this without schema change. Revisit when the catalogue includes apparel / accessories where colour-specific photo sets are genuinely needed (the Amazon / AliExpress model). Single cover-per-variant covers ~90% of small Gulf catalogues; demand evidence (30,000+ WooCommerce stores using free per-variant-gallery plugins, multiple Shopify add-ons surviving at $8–$20/month) confirms this is mostly a fashion/apparel concern. Likely lands in a post-launch polish chunk alongside the bilingual badge.
+  - **Per-variant photo *galleries*** (multiple photos per variant, not just a single cover). Foundation supports this without schema change. Revisit when the catalogue includes apparel / accessories where colour-specific photo sets are genuinely needed (the Amazon / AliExpress model). Single cover-per-variant covers ~90% of small Gulf catalogues; demand evidence (30,000+ WooCommerce stores using free per-variant-gallery plugins, multiple Shopify add-ons surviving at $8–$20/month) confirms this is mostly a fashion/apparel concern. Lands in **Phase 10 (catalog visual polish)**.
   - **In-app cropping or rotation tool.** Operators crop in their phone's native camera before upload; the centre-crop display contract handles the rest.
   - **AI background removal.**
-  - **Video uploads, 360° spin, 3D product views.** When added, short product clips (≤30s, served as-is in HTML5 `<video>`) can ride the same storage adapter built in 1a.7 with no new infrastructure. Longer-form or higher-quality video would adopt BunnyCDN Stream (same vendor, separate service, handles transcoding + adaptive bitrate streaming). Either path keeps storage and CDN under one vendor relationship.
+  - **Video uploads, 360° spin, 3D product views.** Lands in **Phase 10 (catalog visual polish)**. Short product clips (≤30s, served as-is in HTML5 `<video>`) can ride the same storage adapter built in 1a.7 with no new infrastructure. Longer-form or higher-quality video would adopt BunnyCDN Stream (same vendor, separate service, handles transcoding + adaptive bitrate streaming). Either path keeps storage and CDN under one vendor relationship.
   - **Bulk import** (CSV manifest, URL ingest, FTP).
   - ~~**Drag-and-drop reordering on desktop.**~~ **Built in 1a.7.2 same-day follow-up (2026-05-02).** Owner reversed the deferral once the photo screens were live. Drag-reorder works on phone (long-press) and desktop (click-and-drag), with keyboard fallback and screen-reader announcements; moving a photo to position 1 makes it the new cover. See the *Cover photo + reorder* block above.
   - **Image moderation / NSFW detection.** Pointless for a controlled, owner-only catalogue.
   - **AI-generated bilingual alt text on upload** (Claude vision). This belongs to the AI-assisted bilingual entry workstream below, not the image pipeline chunk. Sequencing decided at the time the AI assist panel is scoped — it can land before or after 1a.7. The 1a.7 admin UI ships with a manual alt-text field that the AI assist will later auto-populate.
-  - **Public CDN delivery (BunnyCDN Pull Zone).** The customer-facing CDN edge is provisioned at the top of Phase 1b's Launch infrastructure block — that's when public traffic begins. The 1a.7 storage adapter already supports the BunnyCDN Storage backend, so the Phase 1b switch is config-only (point production at the prod Storage Zone, attach a Pull Zone in front of it). Until launch, dev/test runs against the local-disk backend and serves files directly via `next/image`.
+  - **Public CDN delivery (BunnyCDN Pull Zone).** The customer-facing CDN edge is provisioned in Phase 6 (Launch infrastructure + go live) — that's when public traffic begins. The 1a.7 storage adapter already supports the BunnyCDN Storage backend, so the Phase 6 switch is config-only (point production at the prod Storage Zone, attach a Pull Zone in front of it). Until launch, dev/test runs against the local-disk backend and serves files directly via `next/image`.
 
 *AI-assisted bilingual entry*
 - Admin product form has an "AI assist" panel:
   - One paragraph of input in **either** Arabic or English → auto-generate title, description, SEO title, SEO meta description, suggested category, suggested tags, **and the other-language translation**. Bilingual generation is mandatory, not optional.
   - Image upload → AI-generated alt text (Claude vision) in both `ar` and `en`
   - Optional: upload a product manual or spec sheet → AI extracts structured specs in both locales
-- Arabic output is system-prompted to read natively (not machine-translated feel); the held-out Arabic evaluation set is begun in this phase and refined in Phase 3
+- Arabic output is system-prompted to read natively (not machine-translated feel); the held-out Arabic evaluation set is begun in this phase and refined in Phase 9
 - All AI assists are editable; nothing is auto-published without owner confirmation
 
 *MCP surface for catalog (cumulative with the per-chunk tools above)*
 - MCP tools live: `create_product` (done in Phase 0 chunk 7), `list_products`, `update_product`, `delete_product`, `restore_product`, `hard_delete_expired_products`, `search_products`, `get_product`, `set_product_categories`, `list_categories`, `create_category`, `update_category`, `delete_category`, `restore_category`, `hard_delete_expired_categories`, `set_product_options`, `set_product_variants`
 - Tools accept and return bilingual fields; owner can drive product entry from Claude Desktop in either language
 
-**Exit criteria:** The owner can add a fully bilingual product (`ar` + `en` content, images with alt text in both languages) via the admin UI **or** via Claude Desktop, and verify it via tRPC and MCP tool calls. No public storefront yet. **Playwright coverage: admin product CRUD with bilingual content entry; AI assist panel happy path in both directions (`ar`→`en` and `en`→`ar`). All on mobile viewport. Local checks (lint, typecheck, vitest, Playwright, coverage lint) green — hosted CI enforcement does not exist yet; it lands in the Launch infrastructure block at the top of Phase 1b.** *(The missing-translation badge that was originally part of 1a.6's exit was deferred 2026-05-02 — see the 1a.6 entry above.)*
+**Exit criteria:** The owner can add a fully bilingual product (`ar` + `en` content, images with alt text in both languages) via the admin UI **or** via Claude Desktop, and verify it via tRPC and MCP tool calls. No public storefront yet. **Playwright coverage: admin product CRUD with bilingual content entry; AI assist panel happy path in both directions (`ar`→`en` and `en`→`ar`). All on mobile viewport. Local checks (lint, typecheck, vitest, Playwright, coverage lint) green — hosted CI enforcement does not exist yet; it lands in Phase 6 (Launch infrastructure + go live).** *(The missing-translation badge that was originally part of 1a.6's exit was relocated to Phase 9 on 2026-05-03 — see the 1a.6 entry above.)*
 
 ---
 
-### Phase 1b — Public bilingual storefront (shippable as a browse-only site)
+### Phase 2 — Storefront + Commerce MVP (local-only, no public launch)
 
-**Goal:** The main tenant's domain is live, publicly indexable, and browseable in both Arabic and English from day one. Customers can find and view products in their preferred language with proper RTL layout; they cannot buy yet. This phase also delivers the production infrastructure that Phase 0 deferred: host, CI, CDN, error monitoring, and backups.
+**Goal:** Build the entire customer-facing storefront — home, category, product detail, search — and the full commerce surface — cart, checkout, refund, bilingual confirmation emails, daily digest. End-to-end in both Arabic and English, on a self-built mock payment provider. All work happens locally; no public deploy this phase. Real KSA payments wire in Phase 5 (still locally / on staging); the public URL goes live and earns the first riyal in Phase 6.
+
+**Why local-only this phase:** Real KSA revenue requires three things to all be ready together: a Moyasar account (paperwork-gated by Saudi Commercial Registration), ZATCA-compliant invoicing submitted to the Fatoora portal (Phase 4), and production hosting (Phase 6). Building against a self-built mock payment provider lets the storefront and commerce surface be developed, tested, and de-risked locally — no waiting on external accounts, no test-mode network latency, no provider lock-in. When Phase 5 wires Moyasar and Phase 6 stands up production, both are drop-in steps behind interfaces this phase ships, not re-architectures.
 
 **Work:**
-
-*Launch infrastructure (deferred from Phase 0 — must land before the public URL goes live)*
-
-This is the first time the project touches production hosting. It is delivered as one coordinated pass so the public URL can be brought up with all guardrails in place simultaneously; nothing ships to a real domain before this block closes.
-
-- Hetzner Cloud VM provisioned (CCX or CPX class, Ubuntu LTS)
-- Coolify installed and configured
-- Postgres, Redis, Meilisearch running as Coolify-managed services (parity with the local Docker Compose stack). PgBouncer (if introduced) configured with `pool_mode = transaction | session` — statement-mode pooling breaks RLS and is a hard-refuse
-- BunnyCDN Storage Zone (production bucket) + Pull Zone created. The 1a.7 storage adapter already supports the BunnyCDN Storage backend, so this is provisioning + env config — no code change.
-- Mailpit container running in Coolify for staging email preview (local dev continues to use Docker Compose)
-- GitHub repo wired to GitHub Actions → Coolify deploy webhook
-- GitHub Actions workflow, fails-closed: `lint → typecheck → vitest → playwright → lighthouse-ci → check-e2e-coverage → check-role-invariants → deploy webhook`
-- Lighthouse CI enforcing mobile perf budgets on every build — red → no deploy
-- `check:e2e-coverage` extended to cover MCP mutations (currently tRPC-only) so every transport's writes are forced to carry a Playwright test
-- AST-level lint: `throw APIError` in a BA `hooks.before` must be preceded by an inline `writeAuditInOwnTx`; `after`-shape closed-set lint for `auth.*` operations (≤3 keys, structural-only)
-- Env management + secrets in Coolify. CI env-lint rejects any test-only switch in production values (`APP_ENV=e2e|seed`, `E2E_AUTH_RATE_LIMIT_DISABLED=1`, `MCP_RUN_SQL_ENABLED=1`) and asserts Better Auth's internal rate-limiter stays disabled (our Redis sliding-window is authoritative)
-- Sentry project wired up with a `beforeSend` scrubber that strips customer identifiers, PAT plaintext/hash, and captured React-component props. Builds on the Phase 0 error-log scrubbing pass so the scrubber is the last line of defense, not the only one
-- Nightly `pg_dump` → Hetzner Storage Box with restore drill documented
-- Basic health check / uptime monitoring
-- Coolify GitHub PAT wired for auto-deploy on green CI
 
 *Public storefront pages*
 - Home (featured products, categories)
 - Category listing with filters (brand, price range, option facets)
-- Product detail page (variant selector, gallery, specs, related products). Gallery is a swipe carousel with visible thumbnails (not dot indicators — Baymard found 76% of mobile sites use dots-only and shoppers regularly miss photos). Pinch-to-zoom is table stakes; tap-to-zoom-overlay is the fallback. Variant switching swaps the cover photo using the per-variant cover assignment from 1a.7; the rest of the gallery stays the same in v1 (per-variant galleries are deferred — see 1a.7).
+- Product detail page (variant selector, gallery, specs, related products). Gallery is a swipe carousel with visible thumbnails (not dot indicators — Baymard found 76% of mobile sites use dots-only and shoppers regularly miss photos). Pinch-to-zoom is table stakes; tap-to-zoom-overlay is the fallback. Variant switching swaps the cover photo using the per-variant cover assignment from 1a.7; the rest of the gallery stays the same in v1 (per-variant galleries are deferred to Phase 10 — see 1a.7).
 - Search (Meilisearch-powered, with Arabic tokenization tuned: stop words, normalization of ا/أ/إ, ة/ه, ي/ى)
 - Basic static pages (about, contact)
 - Mobile-first responsive design (see NFRs in section 6)
@@ -528,33 +512,22 @@ This is the first time the project touches production hosting. It is delivered a
 - Canonical URLs (critical when the same product lives under multiple categories)
 - Image sitemaps (AV is visual) — entries reference the descriptive public URLs produced by 1a.7
 
-*Compliance & polish*
-- Cookie consent banner (PDPL-ready)
-
-**Exit criteria:** The main tenant's domain is live, publicly accessible, indexable in both languages, and shows real bilingual products with working variant selection. A monolingual Arabic shopper can discover, browse, and view a product entirely in Arabic with proper RTL layout and Arabic search. The owner can add a product via Claude Desktop and see it live on the site within seconds — in both languages. A shopper can find a product via Google in either language and view it — but cannot buy. **Playwright coverage: home, category listing (with filters), product detail (with variant selection), search. Tests run in both `en` and `ar` on mobile viewport; the `ar` tests assert RTL layout, real Arabic content rendering (not fallback), and Arabic search results. CI green including Lighthouse budgets.**
-
-**Why ship this:** SEO takes weeks to build traction in **both** languages. Start the clock early on both, not just one. The bilingual seed catalog from Phase 1a makes this a launch, not a placeholder.
-
----
-
-### Phase 2 — Commerce MVP + commerce MCP tools (FIRST REVENUE)
-
-**Goal:** A shopper can complete a real purchase with real money — in Arabic or English. KSA only. The owner can manage orders via Claude.
-
-**Work:**
-
 *Commerce*
 - Cart (persistent, guest-allowed, variant-aware)
 - Guest checkout (email + KSA National Address format + phone with `+966` validation)
 - Shipping zones + flat-rate / weight-based shipping rules
 - VAT calculation (15% KSA)
-- Moyasar integration: Mada, Visa/MC, Apple Pay
+- **Payment provider abstraction:** a single `PaymentProvider` interface (`createPayment`, `capturePayment`, `refundPayment`, `handleWebhook`, status normalization) implemented behind one runtime registry — same pattern as the storage adapter from 1a.7. Moyasar (Phase 5), Stripe, Tabby, Tamara all become additional implementations behind the same interface, not re-architectures.
+- **Self-built mock payment provider** — the local-only "Mailpit equivalent" for payments. Completes the purchase flow against an in-process fake: no network calls, no real cards, deterministic outcomes selectable per checkout (success, declined, 3DS challenge, webhook delay). Runs identically in dev, e2e, and any pre-launch staging.
 - Order creation + stock decrement (transactional — no overselling)
 - Order confirmation email (Resend) + SMS (Unifonic) — bilingual templates rendered per the customer's locale preference at order time
 - Basic admin order view (list, detail, mark as shipped/cancelled)
 - Shipping integration stub (manual tracking number entry for now; carrier API later)
-- Refund flow (admin-initiated, Moyasar refund API)
-- Invoice PDF generation (ZATCA-schema-compliant data model, not yet submitted to ZATCA)
+- Refund flow (admin-initiated, against the mock provider's `refundPayment`; identical UI in Phase 5 once Moyasar replaces the mock)
+- Invoice PDF generation (ZATCA-schema-compliant data model, not yet submitted to ZATCA — submission lands in Phase 4)
+
+*Compliance & polish*
+- Cookie consent banner (PDPL-ready)
 
 *MCP surface for commerce*
 - MCP tools live: `list_orders`, `get_order`, `refund_order` (with `confirm: true`), `mark_order_shipped`, `adjust_inventory`, `get_inventory`, `search_customers`, `get_customer`
@@ -563,30 +536,11 @@ This is the first time the project touches production hosting. It is delivered a
 - **Daily digest agent** (cron): summarizes yesterday — new orders, revenue, top products, low stock, anomalies — and emails the owner. Implemented as a Claude tool-use loop calling the MCP server.
 - **Stock watchdog agent** (cron, hourly): scans inventory, flags low-stock variants with velocity-based reorder suggestions.
 
-**Exit criteria:** A real customer can place and pay for a real order in either language, get a localized confirmation, and the admin can fulfill it. First riyal earned. The owner receives a daily digest email and can refund/ship orders from Claude Desktop. **Playwright coverage: full cart → guest checkout → Moyasar test-card payment → order confirmation email (via Mailpit, asserted per locale: Arabic email for `ar` checkout, English email for `en` checkout) → admin marks shipped → customer sees shipped status. Refund flow end-to-end. All in both locales on mobile viewport.**
+**Exit criteria:** Locally, a shopper can browse the entire storefront in either Arabic or English with proper RTL layout and Arabic search, complete a full purchase against the mock payment provider, get a localized bilingual confirmation, and the admin can fulfill or refund it. The owner receives a daily digest email and can refund/ship orders from Claude Desktop. **Playwright coverage: home, category listing (with filters), product detail (with variant selection), search; full cart → guest checkout → mock-payment success → order confirmation email (via Mailpit, asserted per locale: Arabic email for `ar` checkout, English email for `en` checkout) → admin marks shipped → customer sees shipped status. Mock-payment failure paths also covered (declined, 3DS challenge). Refund flow end-to-end. All in both locales on mobile viewport. The `ar` tests assert RTL layout, real Arabic content rendering (not fallback), and Arabic search results.**
 
 ---
 
-### Phase 3 — Bilingual AI hardening + RTL polish
-
-**Goal:** Now that the platform launched bilingually in Phases 1b and 2, this phase hardens Arabic AI quality, matures the translation-management workflow, and runs a comprehensive RTL audit across everything built so far. This is polish, not launch — the launch already happened.
-
-**Work:**
-- Translation management UI in admin: review missing strings, accept AI-suggested translations, mark approved, see coverage per locale
-- Comprehensive RTL audit and fixes across every page built through Phase 2 (storefront + checkout + admin + emails) — visual regression snapshots locked
-- Arabic typography polish: Western numerals 0–9 for prices to match KSA banking UX, font weight pass, line-height tuning for mixed Arabic/Latin runs
-- **Bilingual AI hardening:**
-  - MCP tools accept and respond in Arabic (input language detection, response in same language)
-  - Daily digest available in Arabic
-  - AI content generation Arabic quality tuned and evaluated against a **held-out set of real AV product descriptions** — pass threshold defined and measured
-  - System prompt tuning so Arabic output reads natively (not machine-translated feel)
-  - Eval harness checked into the repo and runnable via `pnpm eval:ar`
-
-**Exit criteria:** Arabic AI output passes the held-out eval set at the agreed threshold. The owner can run the store via Claude entirely in Arabic with native-feeling responses. Translation coverage UI shows ≥ 99% per locale across all UI strings. **Playwright coverage: every existing test continues to pass green in `ar` locale. Visual regression snapshots locked for RTL home, PDP, checkout, and admin. Translation management UI tested end-to-end.**
-
----
-
-### Phase 4 — Accounts, Inventory, Admin v2
+### Phase 3 — Accounts, Inventory, Admin v2
 
 **Goal:** The business can run on the platform day-to-day, and the owner barely ever opens a dashboard.
 
@@ -606,7 +560,7 @@ This is the first time the project touches production hosting. It is delivered a
 *Admin-via-MCP coverage*
 - The owner runs natural-language operations (sales analysis, revenue, inventory, customer lookups, discount creation, order management) through MCP clients (Claude Desktop / Claude Code) connected to the platform's MCP server using their personal access token. No in-app admin chat page is built.
 - `run_sql_readonly` tool fully exposed (owner role only) for ad-hoc analytics: "show me average order value by category this quarter".
-- Phase 4 work here is to make sure the MCP tool surface and personal-access-token UX are complete enough that this end-to-end workflow is comfortable from any MCP client.
+- Phase 3 work here is to make sure the MCP tool surface and personal-access-token UX are complete enough that this end-to-end workflow is comfortable from any MCP client.
 
 *New autonomous agents*
 - **Refund/fraud watcher:** flags unusual refund or chargeback patterns
@@ -617,30 +571,9 @@ This is the first time the project touches production hosting. It is delivered a
 
 ---
 
-### Phase 5 — Second tenant launch + tenant-aware MCP
+### Phase 4 — ZATCA e-invoicing
 
-**Goal:** Sister company goes live on its own domain, its own catalog, its own branding, its own AI agents.
-
-**Work:**
-- Tenant onboarding flow (create tenant, assign domain, upload logo, theme tokens, locale defaults)
-- Per-tenant theming (CSS variables driven by tenant config)
-- Custom domain setup in Coolify/Traefik with auto-SSL
-- Tenant-scoped admin (admins only see their tenant's data)
-- Platform super-admin view for the owner to manage all tenants
-- Separate Sentry projects per tenant
-- Separate analytics properties per tenant
-- Multi-tenant audit: re-verify RLS policies, adversarial isolation testing
-- Separate Resend sender domains per tenant
-- **Tenant-aware MCP:** personal access tokens scoped to tenant; super-admin tokens offer cross-tenant tools (`list_tenants`, `create_tenant`, cross-tenant analytics)
-- Per-tenant daily digests and agent runs
-
-**Exit criteria:** Both brands live on their own domains, fully isolated, fully branded, running from one codebase and one deploy. The owner can ask Claude "how did tenant A do vs tenant B last week" and get a real answer. **Playwright coverage: adversarial tenant isolation tests — tenant A user cannot see or mutate tenant B data via any surface (UI, tRPC, MCP). Per-tenant theming asserted via screenshot diff. Tenant-scoped token tests: an A-scoped token rejected on B-scoped operations.**
-
----
-
-### Phase 6 — ZATCA e-invoicing
-
-**Goal:** Legally compliant invoicing in KSA.
+**Goal:** Legally compliant invoicing in KSA, ready to switch on for live revenue the moment Phase 5 wires real payments. ZATCA submission lands first because real KSA money cannot legally flow without it; finishing it before Moyasar means the Phase 5 cutover is a single coordinated release with no half-state.
 
 **Work:**
 - Decide SDK vs direct ZATCA API (evaluate Wafeq, ClearTax, Zoho Books API, or direct integration)
@@ -650,10 +583,63 @@ This is the first time the project touches production hosting. It is delivered a
 - Cryptographic signing (CSID / PCSID provisioning flow)
 - Invoice storage and retrieval (6-year retention)
 - Credit notes and debit notes
-- Sandbox → production cutover plan
+- Sandbox → production cutover plan (executed when Phase 5 flips real Moyasar on)
 - MCP tools: `get_invoice`, `resubmit_invoice_to_zatca`, `list_invoices`
 
-**Exit criteria:** Every sale produces a ZATCA-compliant invoice submitted to the Fatoora portal, with QR code printable on receipts. **Playwright coverage: checkout → invoice generated → QR code renders on receipt page → invoice PDF downloadable. Integration tests (Vitest) against the ZATCA sandbox for hash chain and signature correctness.**
+**Exit criteria:** Mock-paid orders from Phase 2 produce ZATCA-compliant invoices submitted to the Fatoora **sandbox**; QR code renders on the receipt page; invoice PDF downloadable. Hash chain and signature correctness verified against the sandbox. The integration is production-ready behind an env flag — Phase 5 flips it to live submission as part of the same release that wires real Moyasar. **Playwright coverage: checkout (mock payment) → invoice generated → QR code renders on receipt page → invoice PDF downloadable. Integration tests (Vitest) against the ZATCA sandbox for hash chain and signature correctness.**
+
+---
+
+### Phase 5 — KSA payments via Moyasar
+
+**Goal:** Wire the real Moyasar provider behind the payment abstraction built in Phase 2, with ZATCA's submission path proven end-to-end against the sandbox and ready to flip to production. All work happens locally / on staging this phase — no public deploy yet, so no real money flows. The "first riyal" milestone moves to Phase 6, where the launch infrastructure stands up and the public URL goes live.
+
+**Work:**
+- **Moyasar `PaymentProvider` implementation** behind the Phase 2 interface. Methods: Mada, Visa/Mastercard, Apple Pay. Webhooks wired to the same `handleWebhook` contract the mock implements — the rest of the commerce surface (cart, checkout, orders, refunds, admin order view, daily digest) does not change.
+- Provider registry can route to `moyasar` in non-local environments; staging exercises the real Moyasar sandbox end-to-end.
+- Apple Pay domain verification with the Apple Developer account (against the staging domain; production verification waits for Phase 6's real domain).
+- Refund flow validated against Moyasar's sandbox refund path — same admin UI as Phase 2, same `refundPayment` contract; the underlying call hits Moyasar instead of the mock.
+- ZATCA submission validated end-to-end against the Fatoora sandbox using Moyasar-paid test orders; production-flip path documented for Phase 6's coordinated release.
+- Failed-payment retry / abandoned-cart hooks remain unchanged from Phase 2.
+
+**Exit criteria:** Against staging with Moyasar in sandbox mode, a checkout completes with a real Mada/Visa test card; the order produces a ZATCA-compliant invoice posted to the Fatoora sandbox; refunds work end-to-end through Moyasar. Production cutover plan (env flips, DNS readiness, rollback steps) reviewed and ready to execute in Phase 6. **Playwright coverage: full cart → guest checkout → Moyasar test-card payment (sandbox) → order confirmation email (via Mailpit) → invoice posted to ZATCA sandbox → admin marks shipped → refund via Moyasar test-card refund. All in both locales on mobile viewport.**
+
+---
+
+### Phase 6 — Launch infrastructure + go live (FIRST REVENUE)
+
+**Goal:** Stand up production hosting, point the storefront at it, flip every "sandbox" switch to "production" in a single coordinated release, and earn the first real riyal. This is the first time the project touches a real customer-visible URL; everything before this phase has been local or staging. Delivered as one coordinated pass so the public URL comes up with all guardrails in place simultaneously — nothing is half-shipped.
+
+**Work:**
+
+*Production hosting*
+- Hetzner Cloud VM provisioned (CCX or CPX class, Ubuntu LTS)
+- Coolify installed and configured
+- Postgres, Redis, Meilisearch running as Coolify-managed services (parity with the local Docker Compose stack). PgBouncer (if introduced) configured with `pool_mode = transaction | session` — statement-mode pooling breaks RLS and is a hard-refuse
+- BunnyCDN Storage Zone (production bucket) + Pull Zone created. The 1a.7 storage adapter already supports the BunnyCDN Storage backend, so this is provisioning + env config — no code change
+- Mailpit container running in Coolify for staging email preview (local dev continues to use Docker Compose)
+- Custom domain configured in Coolify/Traefik with auto-SSL for the main tenant's domain (the second tenant's domain waits for Phase 11)
+
+*CI / deploy pipeline*
+- GitHub repo wired to GitHub Actions → Coolify deploy webhook
+- GitHub Actions workflow, fails-closed: `lint → typecheck → vitest → playwright → lighthouse-ci → check-e2e-coverage → check-role-invariants → deploy webhook`
+- Lighthouse CI enforcing mobile perf budgets on every build — red → no deploy
+- `check:e2e-coverage` extended to cover MCP mutations (currently tRPC-only) so every transport's writes are forced to carry a Playwright test
+- AST-level lint: `throw APIError` in a BA `hooks.before` must be preceded by an inline `writeAuditInOwnTx`; `after`-shape closed-set lint for `auth.*` operations (≤3 keys, structural-only)
+- Env management + secrets in Coolify. CI env-lint rejects any test-only switch in production values (`APP_ENV=e2e|seed`, `E2E_AUTH_RATE_LIMIT_DISABLED=1`, `MCP_RUN_SQL_ENABLED=1`) and asserts Better Auth's internal rate-limiter stays disabled (our Redis sliding-window is authoritative)
+- Coolify GitHub PAT wired for auto-deploy on green CI
+
+*Observability + safety nets*
+- Sentry project wired up with a `beforeSend` scrubber that strips customer identifiers, PAT plaintext/hash, and captured React-component props. Builds on the Phase 0 error-log scrubbing pass so the scrubber is the last line of defense, not the only one
+- Nightly `pg_dump` → Hetzner Storage Box with restore drill documented and exercised at least once before go-live
+- Basic health check / uptime monitoring
+
+*Coordinated go-live cutover*
+- Production env brought up with payment-provider set to `moyasar` (production credentials) and ZATCA set to `production` (Fatoora portal) — both flips in one coordinated release, rehearsed on staging first
+- Apple Pay domain verification against the production domain
+- Sentry, BunnyCDN Pull Zone, and uptime monitoring confirmed reporting before traffic is sent
+
+**Exit criteria:** Main tenant's domain is live, publicly accessible, indexable in both languages, and a real customer can place and pay for a real order in either language with a Mada or Visa card, receive a localized bilingual confirmation, and the admin can fulfill or refund it. Every order produces a live ZATCA-compliant invoice in Fatoora. **First riyal earned.** **Playwright coverage: smoke pass against the production domain (read-only, no real payments) — home, category, PDP, search, locale switch, RTL render. Full checkout coverage continues to run against staging Moyasar sandbox in CI as in Phase 5.**
 
 ---
 
@@ -669,7 +655,7 @@ This is the first time the project touches production hosting. It is delivered a
 - Rule-based cross-sell / upsell recommendations (admin-curated "frequently bought together" mappings, plus simple category-based suggestions; semantic/vector-backed recommendations are deferred — see §4 "Deferred")
 
 *Team & operations (custom RBAC)*
-- **Custom role + permission builder.** Owner can define new roles per tenant and attach fine-grained permissions to each. Replaces the fixed owner/staff/support triad from Phase 4 with a data-driven model.
+- **Custom role + permission builder.** Owner can define new roles per tenant and attach fine-grained permissions to each. Replaces the fixed owner/staff/support triad from Phase 3 with a data-driven model.
   - **Permission catalog** (seeded from code, not user-editable): every sensitive operation the platform exposes is a named permission (e.g., `tokens.view`, `tokens.create`, `tokens.revoke`, `products.create`, `orders.refund`, `inventory.adjust`, `run_sql_readonly`, etc.). Permissions are grouped by domain for UI.
   - **Roles table** (per-tenant, tenant-editable): name + description + ordered permission set. The three launch roles (owner, staff, support) are seeded as system roles and remain un-deletable; the owner can clone them into custom roles or create fresh ones.
   - **Memberships** reference a role (not a hardcoded role string), making "make this user a 'fulfillment clerk'" a one-click reassignment.
@@ -725,6 +711,60 @@ This is the first time the project touches production hosting. It is delivered a
 
 ---
 
+### Phase 9 — Bilingual AI hardening + RTL polish
+
+**Goal:** Originally Phase 3, **relocated to a polish phase late in the roadmap on 2026-05-03** by owner decision. Rationale: the Arabic-customer-facing pieces (RTL on storefront / checkout / emails, Western-numeral price typography) are caught reactively as they ship — every existing browser test runs in both Arabic and English on mobile from day one, so RTL regressions surface immediately, and the owner reviews every product entry personally before publishing. The dedicated hardening pass below is therefore polish rather than a launch blocker; it lands once the catalog, growth features, and hardening work are complete and the store has enough scale to justify the eval harness, translation-management UI, and Arabic-native AI tone tuning. **Also absorbs the missing-translation badge originally scoped as Phase 1's 1a.6** (per-field "missing translation" indicator on admin forms + a "show only items missing Arabic" filter on admin lists) — same motivation, same audience, same polish bucket.
+
+**Work:**
+- Translation management UI in admin: review missing strings, accept AI-suggested translations, mark approved, see coverage per locale
+- **Missing-translation badge** (formerly 1a.6): per-field indicator on admin product / variant / category forms, plus a "show only items missing Arabic" filter on each admin list view
+- Comprehensive RTL audit and fixes across every page built through Phase 2 (storefront + checkout + admin + emails) — visual regression snapshots locked
+- Arabic typography polish: Western numerals 0–9 for prices to match KSA banking UX, font weight pass, line-height tuning for mixed Arabic/Latin runs
+- **Bilingual AI hardening:**
+  - MCP tools accept and respond in Arabic (input language detection, response in same language)
+  - Daily digest available in Arabic
+  - AI content generation Arabic quality tuned and evaluated against a **held-out set of real AV product descriptions** — pass threshold defined and measured
+  - System prompt tuning so Arabic output reads natively (not machine-translated feel)
+  - Eval harness checked into the repo and runnable via `pnpm eval:ar`
+
+**Exit criteria:** Arabic AI output passes the held-out eval set at the agreed threshold. The owner can run the store via Claude entirely in Arabic with native-feeling responses. Translation coverage UI shows ≥ 99% per locale across all UI strings; the missing-translation badge surfaces every gap on admin forms and the "missing Arabic" filter works on every admin list. **Playwright coverage: every existing test continues to pass green in `ar` locale. Visual regression snapshots locked for RTL home, PDP, checkout, and admin. Translation management UI and missing-translation badge tested end-to-end.**
+
+---
+
+### Phase 10 — Catalog visual polish
+
+**Goal:** Extend the catalog's visual richness past the Phase 1 must-have surface (single cover per variant, photos only). Two additions: per-variant photo galleries for catalogs that need them, and product video. Both ride infrastructure that already exists from Phase 1's image pipeline — the storage adapter and per-photo derivation pipeline are already video-friendly — so this phase is feature work, not new plumbing.
+
+**Work:**
+- **Per-variant photo galleries.** Multiple photos per variant (not just a single cover). Foundation supports it without schema change — the photo-to-variant relationship was modelled to allow many-to-many from day one; the v1 admin UI in Phase 1's 1a.7 enforced 0-or-1 per variant. This phase lifts that cap, adds a per-variant photo manager UI on the product edit page, and updates the customer-facing product detail page to swap the gallery on variant selection (Amazon / AliExpress pattern). Justified once the catalogue includes apparel, accessories, or other colour-specific photo sets.
+- **Product video uploads.** Short product clips (≤ 30s) served as-is via HTML5 `<video>`, riding the same storage adapter built in 1a.7. Admin upload UI mirrors the photo pipeline (drag-to-upload, per-tile progress, replace-in-place, alt text). Customer-facing storefront renders video alongside photos in the product gallery. If demand emerges for longer-form or higher-quality video, BunnyCDN Stream (same vendor, separate service, handles transcoding + adaptive bitrate streaming) is the planned upgrade path — same vendor relationship, no migration of existing photo storage.
+- **Out of scope:** 360° spin viewers, 3D product views (AR/VR), in-app cropping or rotation, AI background removal, bulk import (CSV / URL ingest / FTP), image moderation. All listed in 1a.7's deferred set with reasoning; revisit later if a real catalog need surfaces.
+
+**Exit criteria:** A variant can carry its own photo set, and the customer-facing product detail page swaps the gallery on variant selection. Products can carry video files; the admin upload + replace + delete flows work and the customer storefront renders video inline. **Playwright coverage: per-variant gallery upload and reorder; variant-switch refreshes the gallery; video upload, video plays inline on product detail. All in both locales on mobile viewport.**
+
+---
+
+### Phase 11 — Second tenant launch + tenant-aware MCP
+
+**Goal:** Sister company goes live on its own domain, its own catalog, its own branding, its own AI agents. **Relocated 2026-05-03 from old Phase 4 to the end of the roadmap.** Rationale: the multi-tenant *architecture* is already in from Phase 0 (RLS, scoped queries, audit, tenant-resolved request context — it has to be from day one). What this phase actually adds is provisioning, theming, separate sender domains, super-admin views, and adversarial cross-tenant isolation testing — "we have a proven playbook to clone" work. Doing it before one brand has reached real revenue and stable operations splits attention prematurely; pushing it to the end means the second brand inherits a battle-tested stack rather than co-discovering bugs alongside the first.
+
+**Work:**
+- Tenant onboarding flow (create tenant, assign domain, upload logo, theme tokens, locale defaults)
+- Per-tenant theming (CSS variables driven by tenant config)
+- Custom domain setup in Coolify/Traefik with auto-SSL
+- Tenant-scoped admin (admins only see their tenant's data)
+- Platform super-admin view for the owner to manage all tenants
+- Separate Sentry projects per tenant
+- Separate analytics properties per tenant
+- Multi-tenant audit: re-verify RLS policies, adversarial isolation testing
+- Separate Resend sender domains per tenant
+- **Tenant-aware MCP:** personal access tokens scoped to tenant; super-admin tokens offer cross-tenant tools (`list_tenants`, `create_tenant`, cross-tenant analytics)
+- Per-tenant daily digests and agent runs
+
+**Exit criteria:** Both brands live on their own domains, fully isolated, fully branded, running from one codebase and one deploy. The owner can ask Claude "how did tenant A do vs tenant B last week" and get a real answer. **Playwright coverage: adversarial tenant isolation tests — tenant A user cannot see or mutate tenant B data via any surface (UI, tRPC, MCP). Per-tenant theming asserted via screenshot diff. Tenant-scoped token tests: an A-scoped token rejected on B-scoped operations.**
+
+---
+
 ### Deferred — revisit when revenue supports the operational cost
 
 The following capabilities were scoped out of the phased roadmap as nice-to-haves. They add real ongoing cost (Claude API spend on high-volume customer traffic, Voyage API for embeddings, eval harness upkeep, adversarial test-set maintenance) and do not block first revenue. Ship the store without them, validate that the business generates revenue, and revisit once a profit signal justifies the operational overhead.
@@ -748,7 +788,7 @@ The following capabilities were scoped out of the phased roadmap as nice-to-have
 
 **When revisiting:** the first decision is whether to ship the bot on Meilisearch-backed retrieval (faster to land, weaker multilingual semantics) or to add pgvector + Voyage first for better Arabic/English semantic retrieval. Either path is roughly a phase of work. The design rules in §6.4, §9.2, and §9.4 that reference the customer bot apply when this work is revived; they are documented now so the principles persist.
 
-**What is *not* deferred** and stays in the core roadmap: the MCP server and all operator tools (the owner runs admin workflows through MCP clients like Claude Desktop / Claude Code — no in-app admin chat page is built), AI-assisted bilingual product entry (Phase 1a), AI-generated abandoned cart emails and blog drafting (Phase 7), and all autonomous ops agents (Phase 2 onward). Those use Claude text generation and MCP tool-use, not embeddings.
+**What is *not* deferred** and stays in the core roadmap: the MCP server and all operator tools (the owner runs admin workflows through MCP clients like Claude Desktop / Claude Code — no in-app admin chat page is built), AI-assisted bilingual product entry (Phase 1), AI-generated abandoned cart emails and blog drafting (Phase 7), and all autonomous ops agents (Phase 2 onward). Those use Claude text generation and MCP tool-use, not embeddings.
 
 ---
 
@@ -827,9 +867,9 @@ Every stored field falls into one of three tiers. The protection strategy follow
 
 ## 7. Open questions / decisions deferred
 
-- **ZATCA provider:** SDK vs direct API — decide at start of Phase 6.
+- **ZATCA provider:** SDK vs direct API — decide at start of Phase 4.
 - **Shipping carriers:** SMSA vs Aramex vs Naqel vs SPL — decide during Phase 2 based on business relationships.
-- **B2B features:** do either tenant sell to businesses (tax-exempt, quotes, purchase orders, net-30 terms)? If yes, this is a meaningful Phase 4–5 addition.
+- **B2B features:** do either tenant sell to businesses (tax-exempt, quotes, purchase orders, net-30 terms)? If yes, this is a meaningful Phase 3–4 addition.
 - **Repair / service / installation:** AV companies often offer installation. Is this in scope? Would add a service-booking module.
 - **Returns policy specifics:** KSA consumer protection law has specific rules — confirm with legal.
 - **Vector search at all:** deferred to post-launch (§4 "Deferred"). The revisit decision is Meilisearch-only vs. pgvector + Voyage, driven by customer-bot reactivation.
@@ -884,7 +924,7 @@ AI is first-class, which means its failure modes are first-class too. These cont
 
 - Customer bot is **strictly RAG-grounded.** System prompt forbids stating any spec, price, or availability that isn't in the retrieved context.
 - AI-generated product copy, blog posts, and abandoned cart emails all require owner review before publishing/sending (no auto-publish).
-- Eval harness (Phase 8) checks AI-generated Arabic against a held-out reference set.
+- Eval harness (Phase 9) checks AI-generated Arabic against a held-out reference set.
 
 ### 9.5 Token security
 
