@@ -1,38 +1,14 @@
 /**
- * `<PhotosSection>` — admin Photos library on the product edit page.
- * Chunk 1a.7.2 Block 4 (frontend-designer).
+ * `<PhotosSection>` — admin photos library on the product edit page.
  *
- * Adds a fourth section to the product edit form, between Categories
- * and Options. Library grid, multi-upload from camera roll or drag,
- * tap-to-promote cover, bilingual alt-text sheet, replace-in-place,
- * and remove confirm. Out-of-band of the four-leg save chain — every
- * mutation here lands immediately, with a local `productUpdatedAt`
- * ref threaded forward as the OCC token.
+ * OCC token threading: until `images.list` starts returning
+ * `productUpdatedAt`, this section keeps a local ref seeded from the
+ * parent product's `expectedUpdatedAt` and advances it after each
+ * successful upload. For metadata-only mutations (set-cover, set-alt,
+ * delete) the procedures don't return a fresh token, so after each one
+ * we refetch the list and the next mutation reads off the updated cache.
  *
- * OCC token threading: until tdd Block 6 lands and `images.list` starts
- * returning `productUpdatedAt`, this section keeps a local ref seeded
- * from the parent product's `expectedUpdatedAt` and advances it after
- * each successful upload (using the returned image row's `updatedAt`).
- * For metadata-only mutations (set-cover, set-alt, delete), the existing
- * tRPC procedures don't return a fresh product token, so after each
- * one we trigger a list refetch and the next mutation reads from the
- * unchanged ref — this is the same OCC behaviour the existing form's
- * four-leg chain has when nothing else updated the product row.
- *
- * Rendering invariants:
- *   - 1:1 squares from 360px up; grid 2 → 3 → 4 columns.
- *   - Logical positioning only (start/end). Cover badge top-start;
- *     kebab bottom-end.
- *   - Touch targets ≥ 44×44 on every action.
- *   - Optimistic in-flight tiles render their blob preview while bytes
- *     fly. Blob URLs are revoked on unmount and on settle.
- *   - Hydration guard mirrors the existing form: kebabs and the
- *     Add-photos CTA are disabled until `setHydrated(true)` to dodge
- *     the SSR/CSR menu-state flash.
- *
- * The component owns everything photo-related; it never reaches into
- * the parent form's state. The parent's four-leg save chain stays
- * untouched.
+ * Blob URLs are revoked on unmount and on settle to prevent leaks.
  */
 "use client";
 
@@ -186,7 +162,6 @@ export function PhotosSection({
     await trpcUtils.images.list.invalidate({ productId });
     // Lift the freshest productUpdatedAt back to the parent form so the
     // four-leg save chain's OCC token stays in sync with photo mutations.
-    // Same-day follow-up to chunk 1a.7.2 (Block 1).
     if (onProductUpdatedAtChange) {
       const fresh = trpcUtils.images.list.getData({ productId })?.productUpdatedAt;
       if (fresh) onProductUpdatedAtChange(fresh);
@@ -209,12 +184,6 @@ export function PhotosSection({
    * are snake_case (`stale_write`); we accept either spelling so the
    * branch fires whether tdd ships the canonical or the legacy form.
    */
-  const isStaleWriteCode = useCallback(
-    (code: string): boolean =>
-      code === "stale_write" || code === "staleWrite",
-    [],
-  );
-
   // ----- drag-to-upload state -----------------------------------------------
   // Drop a file from the OS file manager onto the section to trigger the
   // existing upload flow. The dragenter/dragleave events bubble through
@@ -227,8 +196,7 @@ export function PhotosSection({
   // would otherwise navigate the browser to its URL, unloading the page
   // and any in-flight uploads. preventDefault on the page-level
   // dragover + drop neutralizes that default behavior; our own zone's
-  // listeners still fire normally because they don't propagate up. (per
-  // security review N-2, 1a.7.2 follow-up.)
+  // listeners still fire normally because they don't propagate up.
   useEffect(() => {
     function preventGlobalDrop(e: DragEvent): void {
       e.preventDefault();
@@ -320,7 +288,7 @@ export function PhotosSection({
       // Reset the input so the same file can be re-picked.
       if (addInputRef.current) addInputRef.current.value = "";
     },
-    [productId, occToken, refreshList, isStaleWriteCode],
+    [productId, occToken, refreshList],
   );
 
   // ----- drag-to-upload handlers --------------------------------------------
@@ -352,8 +320,7 @@ export function PhotosSection({
       // Iterate `items` and accept only `kind === "file"` entries. OS
       // drops can carry mixed payloads (URL strings, plain text, OS
       // path strings); filtering at this boundary prevents non-file
-      // items from ever reaching the upload flow. Per security review
-      // N-1 of the 1a.7.2 follow-up.
+      // items from ever reaching the upload flow.
       const files: File[] = [];
       const items = e.dataTransfer.items;
       for (let i = 0; i < items.length; i += 1) {
@@ -413,7 +380,7 @@ export function PhotosSection({
         );
       }
     },
-    [productId, occToken, refreshList, isStaleWriteCode],
+    [productId, occToken, refreshList],
   );
 
   // ----- replace -------------------------------------------------------------
@@ -452,7 +419,7 @@ export function PhotosSection({
       }
       if (replaceInputRef.current) replaceInputRef.current.value = "";
     },
-    [occToken, refreshList, isStaleWriteCode],
+    [occToken, refreshList],
   );
 
   // ----- set cover ----------------------------------------------------------
@@ -474,7 +441,7 @@ export function PhotosSection({
         setUploadError({ target: imageId, code });
       }
     },
-    [occToken, refreshList, setCoverMutation, isStaleWriteCode],
+    [occToken, refreshList, setCoverMutation],
   );
 
   // ----- alt text -----------------------------------------------------------
@@ -498,7 +465,7 @@ export function PhotosSection({
         setUploadError({ target: imageId, code });
       }
     },
-    [occToken, refreshList, setAltMutation, isStaleWriteCode],
+    [occToken, refreshList, setAltMutation],
   );
 
   // ----- remove -------------------------------------------------------------
@@ -522,7 +489,7 @@ export function PhotosSection({
         setUploadError({ target: imageId, code });
       }
     },
-    [occToken, refreshList, deleteMutation, isStaleWriteCode],
+    [occToken, refreshList, deleteMutation],
   );
 
   // ----- derived state ------------------------------------------------------
@@ -541,8 +508,9 @@ export function PhotosSection({
     // Defensive: if the optimistic list went stale (server invalidated
     // between drop and refetch), pad with any persisted images we missed.
     if (out.length !== persistedImages.length) {
+      const optimisticIdSet = new Set(optimisticOrder);
       for (const img of persistedImages) {
-        if (!optimisticOrder.includes(img.id)) out.push(img);
+        if (!optimisticIdSet.has(img.id)) out.push(img);
       }
     }
     return out;
@@ -673,7 +641,6 @@ export function PhotosSection({
       productId,
       occToken,
       refreshList,
-      isStaleWriteCode,
       t,
     ],
   );
@@ -1180,20 +1147,15 @@ function trpcErrorCode(err: unknown): string {
   return "unknown";
 }
 
-/**
- * Detect whether a drag operation carries files (vs text, links, custom
- * MIME). We iterate `dataTransfer.items` and accept only entries whose
- * `kind === "file"`. This is the modern shape and future-proofs the
- * handler against drags that carry mixed payloads (a string item next
- * to a file item — common when a browser drag-source emits both a
- * file and a fallback URL). Per security review N-1 of the 1a.7.2
- * follow-up.
- *
- * During dragenter, browsers may withhold the file's metadata for
- * privacy (Chrome under sandboxed iframes, Safari for cross-origin
- * drags), but the `kind` discriminator is always exposed — that's all
- * we need to gate the overlay.
- */
+// Returns true if the DataTransfer carries at least one file. OS drags
+// can carry mixed payloads (URL strings, plain text alongside a file);
+// checking `kind === "file"` prevents non-file items reaching the upload
+// flow. During dragenter the browser always exposes `kind` even when it
+// withholds the file metadata for privacy.
+function isStaleWriteCode(code: string): boolean {
+  return code === "stale_write" || code === "staleWrite";
+}
+
 function hasFilesInDataTransfer(dt: DataTransfer | null): boolean {
   if (!dt) return false;
   for (let i = 0; i < dt.items.length; i += 1) {

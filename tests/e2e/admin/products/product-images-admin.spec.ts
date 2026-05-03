@@ -23,7 +23,7 @@
  */
 import { test, expect, type Page, request } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import postgres from "postgres";
@@ -341,7 +341,7 @@ test("CSRF: cookie-authed POST upload with cross-origin Origin returns 403", asy
     storageState: { cookies, origins: [] },
   });
   try {
-    const buffer = await readFileBytes(FIXTURE_VALID);
+    const buffer = await readFile(FIXTURE_VALID);
     const seeded = await seedProduct(prefix);
     const res = await ctx.post("/api/admin/images/upload", {
       headers: {
@@ -382,7 +382,7 @@ test("CSRF: cookie-authed POST upload with NO Origin and NO Referer returns 403"
     extraHTTPHeaders: { referer: "" },
   });
   try {
-    const buffer = await readFileBytes(FIXTURE_VALID);
+    const buffer = await readFile(FIXTURE_VALID);
     const seeded = await seedProduct(prefix);
     const res = await ctx.post("/api/admin/images/upload", {
       headers: {
@@ -429,18 +429,6 @@ test("touch targets: Add Photos CTA and tile kebab are ≥ 44×44", async ({ pag
   expect(kebabBox?.height ?? 0).toBeGreaterThanOrEqual(44);
   expect(kebabBox?.width ?? 0).toBeGreaterThanOrEqual(44);
 });
-
-async function readFileBytes(filePath: string): Promise<Buffer> {
-  return await new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    const stream = createReadStream(filePath);
-    stream.on("data", (c: string | Buffer) =>
-      chunks.push(typeof c === "string" ? Buffer.from(c) : c),
-    );
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-    stream.on("error", reject);
-  });
-}
 
 // =====================================================================
 // Same-day follow-up: Block 1 (upload + form save) + Block 5 (drag).
@@ -933,8 +921,7 @@ test("Block 7 — drag non-file content (text) does not show the overlay", async
   });
   // Overlay must not appear — `hasFilesInDataTransfer` guard rejects
   // non-file payloads.
-  await page.waitForTimeout(150);
-  await expect(page.getByTestId("product-photos-drop-overlay")).not.toBeVisible();
+  await expect(page.getByTestId("product-photos-drop-overlay")).not.toBeVisible({ timeout: 5_000 });
 });
 
 test("Block 7 — drop on body outside the zone does not navigate the page", async (
@@ -969,11 +956,10 @@ test("Block 7 — drop on body outside the zone does not navigate the page", asy
   // away to the file's blob URL, unloading the page.
   await page.locator("body").dispatchEvent("dragover", { dataTransfer: dt });
   await page.locator("body").dispatchEvent("drop", { dataTransfer: dt });
-  await page.waitForTimeout(200);
 
   expect(page.url()).toBe(originalUrl);
   // Body-level drops must NOT trigger upload.
-  await expect(page.getByTestId("product-photo-tile")).toHaveCount(0);
+  await expect(page.getByTestId("product-photo-tile")).toHaveCount(0, { timeout: 5_000 });
 });
 
 for (const locale of ["en", "ar"] as const) {
