@@ -3,6 +3,5 @@
 - There is no upload image to products through mcp. Is that on purpose?
 
 ## After phase 1 is done
-- We need to clean things such as:
-    - Silly tests that are not needed and wasting testing time. Perhaps set rules for writing future tests.
 - Set rule to use simplify skill once a chunk implemented before commiting.
+- Check for a way to modify skill/model in one session without affecting future or current sessions!

@@ -123,6 +123,10 @@ A feature is done when:
 
 Do not report a task as complete based on code inspection alone.
 
+### Simplify before commit
+
+When a chunk, sub-chunk, phase, or sub-phase has passed the owner's manual check and is ready to commit, run `/simplify` first to prune over-engineering while the code is proven but still cheap to change. Skip for trivial edits — typo fixes, copy tweaks, one-line config. Treat each suggestion deliberately; don't rubber-stamp.
+
 ---
 
 ## 2. The service layer rule
