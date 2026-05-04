@@ -4,6 +4,14 @@ Reversed and deferred decisions, with the reasoning. Read this before re-litigat
 
 ---
 
+## 2026-05-04 — Testing strategy reversed: Tier 4 no longer the default; suite resized
+
+Browser specs cut from 30 to 11 (with room to grow as storefront/checkout/payments ship). Mid-tier tests cut from 7 to 4. Low-value fast tests pruned. Image processing pipeline refactored to decode-once-encode-many to eliminate worker-contention flake under the new consolidated photo journey.
+
+**Why reversed:** the prior rule ("every feature gets a Playwright test in two locales") produced 30 browser specs running across six device/locale projects, with most tests duplicating coverage that lives in faster tiers. Suite time and per-test agent-context cost both grew faster than confidence. New rule: browser specs reserved for the small set of journeys that meet a three-condition bar (real human triggers it; Tier 2 cannot meaningfully express it; on the critical path for revenue / security / trust). Phase-1 budget is roughly 15–20 specs because the surface is back-office only; the cap scales with the site as new critical surfaces ship. Canonical strategy now lives at `docs/testing.md`; `CLAUDE.md` §1 and the TDD agent definition are operational summaries.
+
+**Caveat for next chunk owner:** the consolidated photo-management browser test exposed a bottleneck in the upload pipeline (17 sharp encodings per upload, each re-decoding the input). Refactored to decode-once and resize+encode 16 times from a shared raw buffer. Polyglot defense and EXIF-orientation behaviour preserved.
+
 ## 2026-05-03 — Phase 1a.6 (bilingual badge) relocated to Phase 9
 
 The JSONB `{ en, ar }` input pair already ships on products / variants / categories from 1a.2 onward. The relocated scope is just the per-field "missing translation" badge and a "show only items missing Arabic" filter on admin lists.

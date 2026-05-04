@@ -13,14 +13,18 @@
  *   4. Reject `image_too_small` if max(width, height) < 1000.
  *   5. SHA-256 the original input bytes (pre-strip, pre-rotate) for
  *      duplicate detection.
- *   6. For each (size, format) of 5 × 3, run sharp(...).rotate().resize(
- *      ...).<format>({ quality }) → buffer + width/height. NEVER call
- *      withMetadata — sharp drops metadata by default after re-encode.
- *      That's the EXIF/ICC/XMP/IPTC strip.
- *   7. Re-encode the original through sharp(...).rotate().<originalFormat>()
- *      so it carries no metadata either. PRD requires the original to be
- *      retained for re-derivation; nothing requires it to keep EXIF/ICC.
- *      Stripping closes the polyglot defense path entirely.
+ *   6. Decode + EXIF-rotate the input ONCE into a raw RGB(A) buffer.
+ *      All 16 outputs (re-encoded original + 15 derivatives) are then
+ *      produced from this raw buffer — no per-output re-decode. AVIF
+ *      encoding dominates the wall-time, but eliminating 15 redundant
+ *      decodes still cuts pipeline time materially under contention.
+ *   7. Re-encode the original from raw pixels. NEVER call
+ *      withMetadata — sharp drops metadata by default. That's the
+ *      EXIF/ICC/XMP/IPTC strip and closes the polyglot defense path.
+ *      The raw buffer was rotated in step 6 so EXIF orientation is
+ *      baked into the pixels.
+ *   8. For each (size, format) of 5 × 3, resize+encode from the same
+ *      raw buffer.
  *
  * Returns: original (re-encoded bytes + dimensions + format), 16 entries
  * to upload (1 original + 15 derivatives), and the JSONB ledger payload
@@ -129,11 +133,35 @@ export async function processImage(
 
   const fingerprint = createHash("sha256").update(inputBytes).digest("hex");
 
-  // Re-encode the original through sharp(.).rotate().<sniffed>() — no
-  // metadata, EXIF orientation baked in. This closes the polyglot
-  // path: even if the input had appended HTML, the output is a clean
+  // Decode + EXIF-rotate the input ONCE into a raw pixel buffer. All
+  // downstream encodes (the re-encoded original + 15 derivatives) reuse
+  // this raw buffer instead of re-decoding the encoded input each time.
+  // Memory cost: a 2000×2000 RGB raw buffer is ~12 MB and lives only
+  // for the duration of this function; the 16 sequential encodes don't
+  // hold raw bitmaps simultaneously.
+  let raw: Buffer;
+  let rawInfo: { width: number; height: number; channels: 1 | 2 | 3 | 4 };
+  try {
+    const result = await sharp(inputBytes, SHARP_INPUT_OPTS)
+      .rotate()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    raw = result.data;
+    rawInfo = { width: result.info.width, height: result.info.height, channels: result.info.channels };
+  } catch (err) {
+    if (err instanceof Error && /input.*pixel.*limit|exceed.*limit/i.test(err.message)) {
+      throw new ImageValidationError("image_dimensions_exceeded");
+    }
+    throw new ImageValidationError("image_corrupt");
+  }
+
+  const rawOpts = { raw: rawInfo };
+
+  // Re-encode the original from raw pixels — no metadata round-trip, EXIF
+  // orientation already baked in by the decode-once rotate. Closes the
+  // polyglot path: trailing HTML in the input cannot survive a raw-pixel
   // round-trip.
-  const reOriginal = await reEncodeOriginal(inputBytes, sniffed);
+  const reOriginal = await reEncodeOriginal(raw, rawOpts, sniffed);
 
   const toUpload: ProcessedToUpload[] = [];
   const derivatives: ImageDerivative[] = [];
@@ -156,13 +184,11 @@ export async function processImage(
     height: reOriginal.height,
   });
 
-  // 15 derivatives: 5 sizes × 3 formats. Run sequentially to keep peak
-  // memory bounded — each sharp instance holds the decoded bitmap; on a
-  // 2000×2000 RGB image that's ~12 MB. Concurrency = 15 would push past
-  // 180 MB on a single upload.
+  // 15 derivatives: 5 sizes × 3 formats. Each iteration resizes+encodes
+  // from the shared raw buffer; no per-iteration decode.
   for (const size of SIZES) {
     for (const format of FORMATS) {
-      const derived = await renderDerivative(inputBytes, size, format);
+      const derived = await renderDerivative(raw, rawOpts, size, format);
       const key = deriveStorageKey({
         tenantSlug: opts.tenantSlug,
         productSlug: opts.productSlug,
@@ -202,37 +228,30 @@ export async function processImage(
   };
 }
 
+type RawOpts = { raw: { width: number; height: number; channels: 1 | 2 | 3 | 4 } };
+
 async function reEncodeOriginal(
-  inputBytes: Buffer,
+  raw: Buffer,
+  rawOpts: RawOpts,
   format: OriginalFormat,
 ): Promise<{ bytes: Buffer; width: number; height: number }> {
-  // Re-encode via sharp; the format chain matches the input. .rotate()
-  // with no args bakes EXIF orientation into pixels. No withMetadata —
-  // sharp drops EXIF/ICC/XMP/IPTC by default.
-  const pipeline = sharp(inputBytes, SHARP_INPUT_OPTS).rotate();
+  const pipeline = sharp(raw, rawOpts);
   let withFormat: sharp.Sharp;
   if (format === "jpeg") withFormat = pipeline.jpeg({ quality: 90, mozjpeg: true });
   else if (format === "png") withFormat = pipeline.png();
   else withFormat = pipeline.webp({ quality: 90 });
-  try {
-    const result = await withFormat.toBuffer({ resolveWithObject: true });
-    return { bytes: result.data, width: result.info.width, height: result.info.height };
-  } catch (err) {
-    if (err instanceof Error && /input.*pixel.*limit|exceed.*limit/i.test(err.message)) {
-      throw new ImageValidationError("image_dimensions_exceeded");
-    }
-    throw new ImageValidationError("image_corrupt");
-  }
+  const result = await withFormat.toBuffer({ resolveWithObject: true });
+  return { bytes: result.data, width: result.info.width, height: result.info.height };
 }
 
 async function renderDerivative(
-  inputBytes: Buffer,
+  raw: Buffer,
+  rawOpts: RawOpts,
   size: DerivativeSize,
   format: DerivativeFormat,
 ): Promise<{ bytes: Buffer; width: number; height: number }> {
   const spec = SIZE_SPECS[size];
-  let pipeline = sharp(inputBytes, SHARP_INPUT_OPTS)
-    .rotate()
+  let pipeline = sharp(raw, rawOpts)
     .resize(spec.width, spec.height, { fit: spec.fit, withoutEnlargement: false });
   switch (format) {
     case "avif":
@@ -245,13 +264,6 @@ async function renderDerivative(
       pipeline = pipeline.jpeg({ quality: FORMAT_QUALITY.jpeg, mozjpeg: true });
       break;
   }
-  try {
-    const result = await pipeline.toBuffer({ resolveWithObject: true });
-    return { bytes: result.data, width: result.info.width, height: result.info.height };
-  } catch (err) {
-    if (err instanceof Error && /input.*pixel.*limit|exceed.*limit/i.test(err.message)) {
-      throw new ImageValidationError("image_dimensions_exceeded");
-    }
-    throw new ImageValidationError("image_corrupt");
-  }
+  const result = await pipeline.toBuffer({ resolveWithObject: true });
+  return { bytes: result.data, width: result.info.width, height: result.info.height };
 }
