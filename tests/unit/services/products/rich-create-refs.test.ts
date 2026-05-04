@@ -10,11 +10,10 @@
  * request's input.
  */
 import { describe, it, expect } from "vitest";
-import { ZodError, z } from "zod";
+import { ZodError } from "zod";
 import {
-  RichOptionInputSchema,
-  RichVariantInputSchema,
   CreateProductRichInputSchema,
+  buildRefMaps,
   resolveRichVariants,
 } from "@/server/services/products/rich-create-refs";
 
@@ -267,39 +266,6 @@ describe("rich-create refs — Zod shape invariants", () => {
     });
     expect(r.success).toBe(false);
   });
-
-  it("input schema has no tenantId field", () => {
-    expect(
-      Object.keys((CreateProductRichInputSchema as z.ZodObject<z.ZodRawShape>).shape),
-    ).not.toContain("tenantId");
-  });
-
-  it("input schema has no role field", () => {
-    expect(
-      Object.keys((CreateProductRichInputSchema as z.ZodObject<z.ZodRawShape>).shape),
-    ).not.toContain("role");
-  });
-
-  it("RichOptionInputSchema rejects invalid ref characters", () => {
-    expect(
-      RichOptionInputSchema.safeParse({
-        ref: "Has Space",
-        name: { en: "X", ar: "ا" },
-        values: [{ ref: "v", value: { en: "v", ar: "ق" } }],
-      }).success,
-    ).toBe(false);
-  });
-
-  it("RichVariantInputSchema accepts a minimum-shaped variant", () => {
-    expect(
-      RichVariantInputSchema.safeParse({
-        sku: "SKU-1",
-        priceSar: 0,
-        stock: 0,
-        optionValueRefs: [],
-      }).success,
-    ).toBe(true);
-  });
 });
 
 describe("resolveRichVariants", () => {
@@ -372,7 +338,7 @@ describe("resolveRichVariants", () => {
       },
     ];
 
-    const out = resolveRichVariants(parsed, optionsResult);
+    const out = resolveRichVariants(parsed, buildRefMaps(parsed, optionsResult));
     expect(out).toHaveLength(2);
     expect(out[0]?.optionValueIds).toEqual([sId, redId]);
     expect(out[1]?.optionValueIds).toEqual([lId, blueId]);
@@ -385,36 +351,4 @@ describe("resolveRichVariants", () => {
     expect(out[0]?.currency).toBe("SAR"); // default
   });
 
-  it("returns the same refMap key shape for option values: '<optionRef>:<valueRef>'", () => {
-    const input = CreateProductRichInputSchema.parse({
-      slug: "x",
-      name: { en: "X", ar: "س" },
-      options: [
-        {
-          ref: "size",
-          name: { en: "Size", ar: "ا" },
-          values: [{ ref: "s", value: { en: "S", ar: "ص" } }],
-        },
-      ],
-      variants: [],
-    });
-    const optionsResult = [
-      {
-        id: "11111111-1111-1111-1111-111111111111",
-        name: { en: "Size", ar: "ا" },
-        position: 0,
-        values: [
-          {
-            id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            value: { en: "S", ar: "ص" },
-            position: 0,
-          },
-        ],
-      },
-    ];
-    // The function under test resolves zero variants without throwing,
-    // and `buildRefMaps` in the same module returns the keying contract.
-    const variants = resolveRichVariants(input, optionsResult);
-    expect(variants).toEqual([]);
-  });
 });

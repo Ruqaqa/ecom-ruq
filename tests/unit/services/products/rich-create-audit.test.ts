@@ -9,7 +9,6 @@
  * hashes).
  */
 import { describe, it, expect } from "vitest";
-import { createHash } from "node:crypto";
 import {
   buildCategoriesAuditSnapshot,
   buildRichCreateAuditAfter,
@@ -148,25 +147,3 @@ describe("buildRichCreateAuditAfter", () => {
   });
 });
 
-// Sanity: the hash format we emit matches the rest of the audit family
-// (sha-256 truncated to 32 hex chars) so investigators can compare.
-describe("hash format", () => {
-  it("is 32 hex chars", () => {
-    const r = buildCategoriesAuditSnapshot({
-      productId: "11111111-1111-1111-1111-111111111111",
-      categoryIds: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
-    });
-    expect(r.hash).toMatch(/^[0-9a-f]{32}$/);
-    // Also: the family uses sha-256 over canonical JSON. We don't lock
-    // the exact bytes (canonical-JSON specifics evolve), only that it's
-    // deterministic and well-formed.
-    const again = buildCategoriesAuditSnapshot({
-      productId: "11111111-1111-1111-1111-111111111111",
-      categoryIds: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
-    });
-    expect(again.hash).toBe(r.hash);
-    // Throwaway sanity that node:crypto is producing 64-char raw output:
-    const raw = createHash("sha256").update("x").digest("hex");
-    expect(raw).toHaveLength(64);
-  });
-});

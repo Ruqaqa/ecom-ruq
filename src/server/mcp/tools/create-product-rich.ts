@@ -1,42 +1,9 @@
-/**
- * `create_product_rich` — composed product creation MCP tool
- * (architect Block 4).
- *
- * The MCP-seam `.strict()` wrapper around the composed
- * `createProductRich` service. Mirrors the visibility / authorize /
- * description shape of the single-piece `create_product` tool:
- *
- *   - `auditMode:"mutation"` (registered in registry.ts) — dispatchTool
- *     runs through `runWithAudit` so the parent `mcp.create_product_rich`
- *     audit row is written in-tx on success.
- *   - bearer + `isWriteRole` gate; tools/list never advertises this
- *     tool to support / customer / anonymous identities.
- *
- * Dry-run handling — the architect's spec says: "throw a sentinel
- * `DryRunRollback` error after step 4 (with the assembled output
- * cached on the error). The orchestrator catches it, treats as success
- * on the wire, but the tx rolls back. Do not record a success audit
- * row for a dry-run; record an `outcome:'success'` audit row with
- * `operation:'mcp.create_product_rich.dry_run'` written in its own
- * follow-up tx after rollback."
- *
- * The dispatcher's mutation flow uses `runWithAudit`'s
- * `isExpectedRollback` hook so the failure-audit row that would
- * otherwise be written for the `DryRunRollback` throw is suppressed.
- * This module's handler then catches the sentinel and writes the
- * `.dry_run` success row in its own follow-up tx via
- * `writeAuditInOwnTx`.
- *
- * Race / failure note (orchestrator clarification §2):
- *   The dry-run audit row is written AFTER rollback. If that follow-up
- *   tx fails (DB connection drop between rollback and follow-up), the
- *   call returns a previewed shape on the wire with no audit trace.
- *   `writeAuditInOwnTx` already captures `audit_write_failure` in
- *   Sentry on its own throw, so the race is observable in production.
- *   Documented here rather than tested with mocks because the cost of
- *   a contrived test (monkey-patching the appDb client) outweighs the
- *   value of exercising a one-in-a-million path.
- */
+// Dry-run flow: the service throws `DryRunRollback` after assembling
+// the preview so the tx rolls back. The dispatcher's
+// `isExpectedRollback` hook suppresses the would-be failure-audit row;
+// this handler then catches the sentinel and writes the `.dry_run`
+// success row in its own follow-up tx (the race in that follow-up is
+// documented at the service module).
 import { z } from "zod";
 import type { McpTool } from "./registry";
 import { McpError } from "../errors";
@@ -65,12 +32,25 @@ export type CreateProductRichMcpInput = CreateProductRichInput;
 
 // MCP wire output schema. The `options` / `categories` arrays carry
 // service-shaped objects; the `product` is the MCP-flavored shape
-// (deletedAtIso, costPriceSar). Variants and options nested objects
-// are carried as-is — the AI agent reads UUIDs from the refMap.
+// (deletedAtIso, costPriceSar). Variants are reshaped here from the
+// service's halalas-shape into the MCP wire's SAR-shape.
+const VariantWireSchema = z.object({
+  id: z.string().uuid(),
+  sku: z.string(),
+  priceSar: z.number().nonnegative(),
+  currency: z.string(),
+  stock: z.number().int().nonnegative(),
+  active: z.boolean(),
+  optionValueIds: z.array(z.string().uuid()),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+type VariantWire = z.infer<typeof VariantWireSchema>;
+
 export const CreateProductRichMcpOutputSchema = z.object({
   product: z.union([ProductOwnerMcpSchema, ProductPublicMcpSchema]),
   options: z.array(z.unknown()),
-  variants: z.array(z.unknown()),
+  variants: z.array(VariantWireSchema),
   categories: z.array(z.unknown()),
   refMap: z.object({
     options: z.record(z.string(), z.string()),
@@ -78,7 +58,12 @@ export const CreateProductRichMcpOutputSchema = z.object({
   }),
   dryRun: z.boolean(),
 });
-export type CreateProductRichMcpOutput = CreateProductRichResult;
+export type CreateProductRichMcpOutput = Omit<
+  CreateProductRichResult,
+  "variants"
+> & {
+  variants: VariantWire[];
+};
 
 const TOOL_DESCRIPTION = [
   "Create a product, its option types and values, its variants, and",
@@ -155,19 +140,46 @@ export const createProductRichTool: McpTool<
       id: ctx.tenant.id,
       defaultLocale: ctx.tenant.defaultLocale,
     };
-    const result = await createProductRich(
-      tx,
-      tenant,
-      ctx.identity.role,
-      input,
-    );
-    // Composite audit `after` — the parent row records bounded
-    // snapshots, not the wire shape.
-    ctx.auditOverride.before = null;
-    ctx.auditOverride.after = result.auditAfter;
-    return result;
+    try {
+      const result = await createProductRich(
+        tx,
+        tenant,
+        ctx.identity.role,
+        input,
+      );
+      // Composite audit `after` — the parent row records bounded
+      // snapshots, not the wire shape.
+      ctx.auditOverride.before = null;
+      ctx.auditOverride.after = result.auditAfter;
+      return toWire(result);
+    } catch (err) {
+      // Reshape the rolled-back preview into the wire shape so the
+      // dispatcher returns a consistent variant shape on the dry-run
+      // path. The rethrow keeps the rollback contract intact.
+      if (err instanceof DryRunRollback) {
+        throw new DryRunRollback(toWire(err.preview as CreateProductRichResult));
+      }
+      throw err;
+    }
   },
 };
+
+function toWire(result: CreateProductRichResult): CreateProductRichMcpOutput {
+  return {
+    ...result,
+    variants: result.variants.map((v) => ({
+      id: v.id,
+      sku: v.sku,
+      priceSar: v.priceMinor / 100,
+      currency: v.currency,
+      stock: v.stock,
+      active: v.active,
+      optionValueIds: v.optionValueIds,
+      createdAt: v.createdAt,
+      updatedAt: v.updatedAt,
+    })),
+  };
+}
 
 /**
  * The dispatcher uses this to recognize the rich-create's dry-run

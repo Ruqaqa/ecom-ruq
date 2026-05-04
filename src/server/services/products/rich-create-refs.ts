@@ -1,25 +1,6 @@
-/**
- * Local-ref schema and resolver helper for `createProductRich`
- * (architect Block 1).
- *
- * Pure module — no DB, no transport. Two responsibilities:
- *
- *   1. The Zod input shape for the composed `create_product_rich` call,
- *      including a `superRefine` that validates ref uniqueness, tuple-
- *      length match, value-ref resolution, and duplicate-tuple absence.
- *      Cross-field violations surface as path-prefixed Zod issues so an
- *      AI agent can correct the exact field.
- *   2. `resolveRichVariants(input, optionsResult)`: converts ref-shaped
- *      variants into the UUID-shaped `SetProductVariantsInput.variants`
- *      the existing setProductVariants service expects, applying the
- *      `priceSar` → `priceMinor` shim at the same seam.
- *
- * Refs are call-scoped strings supplied by the agent (max 32 chars,
- * `[a-z0-9_-]`). They never persist; they exist only inside one input.
- *
- * Caps live in `validate-variants.ts` so options/values/variants caps
- * are one-grep visible across the catalog services.
- */
+// Refs are call-scoped strings the agent supplies so a variant can
+// point at a value the same call is creating. They never persist —
+// resolution to UUIDs happens once, before variants are written.
 import { z } from "zod";
 import {
   MAX_OPTIONS_PER_PRODUCT,
@@ -295,30 +276,21 @@ export function buildRefMaps(
   return { options, optionValues };
 }
 
-/**
- * Convert SAR → halalas (integer halalas). Centralized here so the rich-
- * create seam doesn't reimplement `_product-shapes.sarToHalalas`; we
- * keep the module pure (no MCP imports) by inlining the same formula.
- */
 function sarToHalalas(sar: number): number {
   return Math.round(sar * 100);
 }
 
 /**
  * Convert ref-shaped variant inputs into the UUID-shaped variant inputs
- * the existing `setProductVariants` service expects.
- *
- * Caller is responsible for:
- *   - having parsed `input` through `CreateProductRichInputSchema`
- *     (so cross-field refinement has run);
- *   - having just written the options through `setProductOptions` and
- *     passing the result here.
+ * the existing `setProductVariants` service expects. The caller has
+ * already built the ref maps (after writing options) and passes them
+ * in — this avoids walking the options tree twice.
  */
 export function resolveRichVariants(
   parsed: CreateProductRichInputParsed,
-  optionsResult: ReadonlyArray<OptionResultLike>,
+  refMap: RefMaps,
 ): ResolvedVariantInput[] {
-  const { optionValues } = buildRefMaps(parsed, optionsResult);
+  const { optionValues } = refMap;
   return parsed.variants.map((v) => {
     const optionValueIds = v.optionValueRefs.map((compound) => {
       const id = optionValues[compound];

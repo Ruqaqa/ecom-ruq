@@ -1,17 +1,7 @@
-/**
- * Composite audit-after assembler for `createProductRich`
- * (architect Block 2).
- *
- * One parent audit row carries the composed `after` payload. We REUSE
- * the existing bounded-snapshot helpers for options + variants so the
- * forensic shape (no localized text, no SKU strings, ids+hashes only)
- * stays uniform across single-piece and composed surfaces. The audit
- * chain has a 64KB-per-row cap; bounded snapshots keep us safely under.
- *
- * The parent shape is `{ productId, options, variants, categories }`
- * with each section nullable (null means: that bag was empty in the
- * input — no row written).
- */
+// Composite parent audit-after for the rich-create call. Each section
+// is nullable: null means the input bag was empty. Reuses the existing
+// bounded-snapshot helpers (ids + hashes only, no localized text) so
+// composed and single-piece audit rows stay forensically uniform.
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonical-json";
 import {

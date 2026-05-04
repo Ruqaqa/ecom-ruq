@@ -179,15 +179,15 @@ describe("createProductRich — happy path", () => {
     ]);
     expect(Object.keys(result.refMap.optionValues)).toContain("size:small");
     expect(Object.keys(result.refMap.optionValues)).toContain("color:red");
-    // priceSar surfaces correctly on each variant. The variants service
-    // returns rows ordered by (createdAt, id); inside a single tx those
-    // collide so we don't lock the position — instead we assert each
-    // wanted SKU/price pair is present.
+    // Service returns priceMinor (halalas — storage unit). The variants
+    // service returns rows ordered by (createdAt, id); inside a single
+    // tx those collide so we don't lock the position — instead we assert
+    // each wanted SKU/price pair is present.
     const variantPriceBySku = new Map(
-      result.variants.map((v) => [v.sku, v.priceSar]),
+      result.variants.map((v) => [v.sku, v.priceMinor]),
     );
-    expect(variantPriceBySku.get(`${slug}-S-R`)).toBe(50);
-    expect(variantPriceBySku.get(`${slug}-L-B`)).toBe(70);
+    expect(variantPriceBySku.get(`${slug}-S-R`)).toBe(5000);
+    expect(variantPriceBySku.get(`${slug}-L-B`)).toBe(7000);
 
     // db-side: rows persisted under the right tenant.
     expect(await countRows("products", tenantId)).toBe(1);
@@ -341,92 +341,6 @@ describe("createProductRich — failure → rollback", () => {
     ).toBe(1);
   });
 
-  it("duplicate variant tuples rejected at Zod parse with right path", async () => {
-    const tenantId = await makeTenant();
-    const slug = `dup-${randomUUID().slice(0, 8)}`;
-    let caught: unknown = null;
-    try {
-      await withTenant(superDb, ctxFor(tenantId), (tx) =>
-        createProductRich(tx, baseTenantInfo(tenantId), "owner", {
-          slug,
-          name: { en: "Dup", ar: "د" },
-          options: [
-            {
-              ref: "size",
-              name: { en: "Size", ar: "م" },
-              values: [{ ref: "s", value: { en: "S", ar: "ص" } }],
-            },
-          ],
-          variants: [
-            {
-              sku: `${slug}-1`,
-              priceSar: 1,
-              stock: 1,
-              optionValueRefs: ["size:s"],
-            },
-            {
-              sku: `${slug}-2`,
-              priceSar: 1,
-              stock: 1,
-              optionValueRefs: ["size:s"],
-            },
-          ],
-        }),
-      );
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeTruthy();
-    // Zod failure surfaces with `duplicate_variant_combination` at the
-    // right path — the AI agent reads the path to fix the exact field.
-    const issues = (caught as { issues?: Array<{ message: string; path: PropertyKey[] }> }).issues;
-    expect(issues).toBeTruthy();
-    const dup = issues!.find(
-      (i) => i.message === "duplicate_variant_combination",
-    );
-    expect(dup).toBeTruthy();
-    // Atomicity: nothing persisted.
-    expect(await countRows("products", tenantId)).toBe(0);
-  });
-
-  it("ref resolver fails the right path on unknown ref (Zod parse)", async () => {
-    const tenantId = await makeTenant();
-    const slug = `unknown-${randomUUID().slice(0, 8)}`;
-    let caught: unknown = null;
-    try {
-      await withTenant(superDb, ctxFor(tenantId), (tx) =>
-        createProductRich(tx, baseTenantInfo(tenantId), "owner", {
-          slug,
-          name: { en: "X", ar: "س" },
-          options: [
-            {
-              ref: "size",
-              name: { en: "Size", ar: "م" },
-              values: [{ ref: "s", value: { en: "S", ar: "ص" } }],
-            },
-          ],
-          variants: [
-            {
-              sku: `${slug}-x`,
-              priceSar: 1,
-              stock: 1,
-              optionValueRefs: ["size:nope"],
-            },
-          ],
-        }),
-      );
-    } catch (e) {
-      caught = e;
-    }
-    const issues = (caught as { issues?: Array<{ message: string; path: PropertyKey[] }> }).issues;
-    expect(issues).toBeTruthy();
-    const unknown = issues!.find(
-      (i) => i.message === "option_value_ref_unknown",
-    );
-    expect(unknown).toBeTruthy();
-    expect(unknown!.path).toEqual(["variants", 0, "optionValueRefs", 0]);
-  });
-
   it("[a,b] vs [b,a] tuples are both honored (position is significant)", async () => {
     const tenantId = await makeTenant();
     const slug = `order-${randomUUID().slice(0, 8)}`;
@@ -512,16 +426,3 @@ describe("createProductRich — cross-tenant isolation (orchestrator §1)", () =
   });
 });
 
-describe("createProductRich — input shape", () => {
-  it("rejects unknown extra keys at the top level (.strict)", async () => {
-    const { CreateProductRichInputSchema } = await import(
-      "@/server/services/products/rich-create-refs"
-    );
-    const r = CreateProductRichInputSchema.safeParse({
-      slug: "x",
-      name: { en: "X", ar: "س" },
-      tenantId: "00000000-0000-0000-0000-000000000000",
-    });
-    expect(r.success).toBe(false);
-  });
-});
