@@ -1,5 +1,5 @@
 /**
- * `create_product` MCP tool — unit tests for the tool shape in isolation
+ * `update_product` MCP tool — unit tests for the tool shape in isolation
  * (authorize, isVisibleFor, schema strictness, tx tripwire).
  *
  * Per docs/testing.md §3, per-tool MCP rules are tested at Tier 2.
@@ -11,9 +11,9 @@
 import { describe, it, expect } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
-  createProductTool,
-  CreateProductMcpInputSchema,
-} from "@/server/mcp/tools/create-product";
+  updateProductTool,
+  UpdateProductMcpInputSchema,
+} from "@/server/mcp/tools/update-product";
 import { McpError } from "@/server/mcp/errors";
 import type { McpRequestContext } from "@/server/mcp/context";
 import type { Tenant } from "@/server/tenant";
@@ -35,7 +35,7 @@ function ctxBearer(role: "owner" | "staff" | "support"): McpRequestContext {
       userId: "u-1",
       tokenId: "tok-1",
       role,
-      scopes: { role, tools: ["create_product"] },
+      scopes: { role, tools: ["update_product"] },
     },
     correlationId: "cid-1",
     auditOverride: {},
@@ -49,36 +49,36 @@ const ctxAnon: McpRequestContext = {
   auditOverride: {},
 };
 
-describe("createProductTool — isVisibleFor (Decision 2: HIDE)", () => {
+describe("updateProductTool — isVisibleFor", () => {
   it("visible for owner bearer", () => {
-    expect(createProductTool.isVisibleFor(ctxBearer("owner"))).toBe(true);
+    expect(updateProductTool.isVisibleFor(ctxBearer("owner"))).toBe(true);
   });
 
   it("visible for staff bearer", () => {
-    expect(createProductTool.isVisibleFor(ctxBearer("staff"))).toBe(true);
+    expect(updateProductTool.isVisibleFor(ctxBearer("staff"))).toBe(true);
   });
 
   it("hidden for support bearer — non-write role", () => {
-    expect(createProductTool.isVisibleFor(ctxBearer("support"))).toBe(false);
+    expect(updateProductTool.isVisibleFor(ctxBearer("support"))).toBe(false);
   });
 
   it("hidden for anonymous", () => {
-    expect(createProductTool.isVisibleFor(ctxAnon)).toBe(false);
+    expect(updateProductTool.isVisibleFor(ctxAnon)).toBe(false);
   });
 });
 
-describe("createProductTool — authorize (defense-in-depth)", () => {
+describe("updateProductTool — authorize (defense-in-depth)", () => {
   it("owner authorize does NOT throw", () => {
-    expect(() => createProductTool.authorize(ctxBearer("owner"))).not.toThrow();
+    expect(() => updateProductTool.authorize(ctxBearer("owner"))).not.toThrow();
   });
 
   it("staff authorize does NOT throw", () => {
-    expect(() => createProductTool.authorize(ctxBearer("staff"))).not.toThrow();
+    expect(() => updateProductTool.authorize(ctxBearer("staff"))).not.toThrow();
   });
 
   it("support authorize throws McpError('forbidden')", () => {
     try {
-      createProductTool.authorize(ctxBearer("support"));
+      updateProductTool.authorize(ctxBearer("support"));
       throw new Error("expected McpError");
     } catch (err) {
       expect(err).toBeInstanceOf(McpError);
@@ -88,7 +88,7 @@ describe("createProductTool — authorize (defense-in-depth)", () => {
 
   it("anonymous authorize throws McpError('unauthorized')", () => {
     try {
-      createProductTool.authorize(ctxAnon);
+      updateProductTool.authorize(ctxAnon);
       throw new Error("expected McpError");
     } catch (err) {
       expect(err).toBeInstanceOf(McpError);
@@ -97,47 +97,55 @@ describe("createProductTool — authorize (defense-in-depth)", () => {
   });
 });
 
-describe("createProductTool — input schema .strict() at MCP seam", () => {
-  it("rejects adversarial extra key tenantId", () => {
-    // The exact attack shape from the integration test: a tenant-A PAT
-    // tries to call `create_product` with `tenantId: "<tenantB>"` in
-    // the body. `.strict()` at this seam makes that a Zod validation
-    // failure before the service fn ever runs.
-    const result = CreateProductMcpInputSchema.safeParse({
-      slug: "tenantId-attack",
-      name: { en: "X", ar: "س" },
+describe("updateProductTool — input schema .strict() at MCP seam", () => {
+  it("rejects adversarial extra key tenantId (cross-tenant attack surface)", () => {
+    const result = UpdateProductMcpInputSchema.safeParse({
+      id: randomUUID(),
+      expectedUpdatedAt: new Date().toISOString(),
+      slug: "ok",
       tenantId: randomUUID(),
     });
     expect(result.success).toBe(false);
   });
 
   it("rejects extra key `role` (input-channel role-elevation attack)", () => {
-    const result = CreateProductMcpInputSchema.safeParse({
-      slug: "role-attack",
-      name: { en: "X", ar: "س" },
+    const result = UpdateProductMcpInputSchema.safeParse({
+      id: randomUUID(),
+      expectedUpdatedAt: new Date().toISOString(),
+      slug: "ok",
       role: "owner",
     });
     expect(result.success).toBe(false);
   });
 
-  it("accepts a minimal valid input", () => {
-    const result = CreateProductMcpInputSchema.safeParse({
-      slug: "valid-product",
-      name: { en: "X", ar: "س" },
+  it("rejects empty editable set (refine fires)", () => {
+    const result = UpdateProductMcpInputSchema.safeParse({
+      id: randomUUID(),
+      expectedUpdatedAt: new Date().toISOString(),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a minimal valid input (single editable key)", () => {
+    const result = UpdateProductMcpInputSchema.safeParse({
+      id: randomUUID(),
+      expectedUpdatedAt: new Date().toISOString(),
+      slug: "valid-slug",
     });
     expect(result.success).toBe(true);
   });
 });
 
-describe("createProductTool — handler tripwire", () => {
+describe("updateProductTool — handler tripwire", () => {
   it("throws McpError('internal_error') if dispatcher passes tx=null on mutation path", async () => {
     const ctx = ctxBearer("owner");
     const input = {
-      slug: "a",
-      name: { en: "A", ar: "أ" },
+      id: randomUUID(),
+      expectedUpdatedAt: new Date().toISOString(),
+      slug: "x",
     };
     try {
-      await createProductTool.handler(ctx, input, null);
+      await updateProductTool.handler(ctx, input, null);
       throw new Error("expected McpError");
     } catch (err) {
       expect(err).toBeInstanceOf(McpError);

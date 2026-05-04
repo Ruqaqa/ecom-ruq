@@ -1,13 +1,24 @@
 /**
- * Chunk 1a.4.2 — End-to-end: edit-category page (Block 3).
+ * Admin edits a category — Tier-4 keep per docs/testing.md §3.
  *
- * Mirrors the products edit-form contract: OCC, dirty-aware Cancel,
- * sticky bottom action bar, discard-confirm dialog, stale-write
- * banner with refresh CTA, beforeunload listener registration. No
- * Remove button (1a.4.3 territory). No slug-sync button on edit.
+ * §3 reason: rename + re-parent through the picker is the operator's
+ * golden-path edit journey. Trimmed per the chunk-4 audit:
+ *   - Inner `for (locale of [...])` loops dropped — projects pin a locale.
+ *   - Per-feature touch-target asserts removed (§4.2).
+ *   - Stale-write OCC banner deleted — §3 explicitly: "stale-write OCC
+ *     banners on every form — one test on one form covers the pattern."
+ *     edit-product.spec.ts covers it.
+ *   - Picker excludes self/descendants deleted — Tier-2 covered as cycle
+ *     rejections in tests/unit/services/categories/update-category.test.ts.
+ *   - Cancel-with-no-edits navigates back deleted — trivial routing.
+ *   - Slug change-warning helper deleted — UI helper text, not a load-bearing
+ *     behavior at Tier 4.
+ *   - beforeunload sanity deleted — proxy assertion (button-enabled).
+ *   - Parent-picker search filter deleted — covered in create-category spec.
+ *   - Single axe scan for the /admin/categories/[id] surface (§4.2 — once
+ *     per distinct visual page across the suite).
  *
- * Coverage-lint substring contract: `categories.update` must appear
- * in this file (categories.update).
+ * Coverage-lint substring contract: `categories.update` (categories.update).
  */
 import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
@@ -27,8 +38,6 @@ const expected = {
     listTitle: "Categories",
     submit: "Save changes",
     cancel: "Cancel",
-    discardConfirm: "Discard changes",
-    keepEditing: "Keep editing",
     signInSubmit: "Sign in",
     emailLabel: "Email",
     passwordLabel: "Password",
@@ -38,17 +47,23 @@ const expected = {
     listTitle: "الفئات",
     submit: "حفظ التغييرات",
     cancel: "إلغاء",
-    discardConfirm: "تجاهل التغييرات",
-    keepEditing: "متابعة التعديل",
     signInSubmit: "تسجيل الدخول",
     emailLabel: "البريد الإلكتروني",
     passwordLabel: "كلمة المرور",
   },
 } as const;
 
+type Locale = keyof typeof expected;
+
+function projectLocale(testInfo: {
+  project: { metadata?: { locale?: string } };
+}): Locale {
+  return testInfo.project.metadata?.locale === "ar" ? "ar" : "en";
+}
+
 async function signIn(
   page: Page,
-  locale: "en" | "ar",
+  locale: Locale,
   email: string,
 ): Promise<void> {
   await page.goto(`/${locale}/signin`);
@@ -94,24 +109,17 @@ async function seedCategoryInDevTenant(opts: {
   }
 }
 
-async function bumpUpdatedAt(categoryId: string): Promise<void> {
-  const sql = postgres(DATABASE_URL, { max: 1 });
-  try {
-    await sql`UPDATE categories SET updated_at = now() + interval '1 second' WHERE id = ${categoryId}`;
-  } finally {
-    await sql.end({ timeout: 5 });
-  }
-}
-
 async function readCategoryRow(
   categoryId: string,
-): Promise<{ name: { en: string; ar: string }; parent_id: string | null } | undefined> {
+): Promise<
+  | { name: { en: string; ar: string }; parent_id: string | null }
+  | undefined
+> {
   const sql = postgres(DATABASE_URL, { max: 1 });
   try {
-    const rows = await sql<Array<{
-      name: { en: string; ar: string };
-      parent_id: string | null;
-    }>>`
+    const rows = await sql<
+      Array<{ name: { en: string; ar: string }; parent_id: string | null }>
+    >`
       SELECT name, parent_id::text AS parent_id FROM categories WHERE id = ${categoryId}
     `;
     return rows[0];
@@ -124,49 +132,46 @@ function uniqueSlug(tag: string): string {
   return `e2e-ec-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 }
 
-for (const locale of ["en", "ar"] as const) {
-  test(`admin edit category — rename happy path, ${locale}`, async ({ page }) => {
-    test.setTimeout(60_000);
-    const seeded = await seedCategoryInDevTenant({
-      slug: uniqueSlug(`rename-${locale}`),
-      name: { en: "Pristine", ar: "أصلي" },
-    });
-    await signIn(page, locale, OWNER_EMAIL);
-    await page.goto(`/${locale}/admin/categories/${seeded.id}`);
-
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      expected[locale].title,
-    );
-
-    // Submit starts disabled — no edits yet.
-    const submit = page.getByTestId("edit-category-submit");
-    await expect(submit).toBeDisabled();
-
-    const newNameEn = `Edited-${Date.now()}`;
-    await page.locator("#category-name-en").fill(newNameEn);
-    await expect(submit).toBeEnabled();
-
-    // axe before navigating away.
-    await expectAxeClean(page);
-
-    await Promise.all([
-      page.waitForURL(
-        new RegExp(`/${locale}/admin/categories\\?updatedId=`),
-        { timeout: 15_000 },
-      ),
-      submit.click(),
-    ]);
-    await expect(page.getByTestId("updated-category-message")).toBeVisible();
-
-    const row = await readCategoryRow(seeded.id);
-    expect(row?.name.en).toBe(newNameEn);
+test("admin edit category — rename happy path", async ({ page }, testInfo) => {
+  const locale = projectLocale(testInfo);
+  const seeded = await seedCategoryInDevTenant({
+    slug: uniqueSlug(`rename-${locale}`),
+    name: { en: "Pristine", ar: "أصلي" },
   });
-}
+  await signIn(page, locale, OWNER_EMAIL);
+  await page.goto(`/${locale}/admin/categories/${seeded.id}`);
+
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    expected[locale].title,
+  );
+
+  // Submit starts disabled — no edits yet.
+  const submit = page.getByTestId("edit-category-submit");
+  await expect(submit).toBeDisabled();
+
+  const newNameEn = `Edited-${Date.now()}`;
+  await page.locator("#category-name-en").fill(newNameEn);
+  await expect(submit).toBeEnabled();
+
+  // Single axe scan for the /admin/categories/[id] surface (§4.2).
+  await expectAxeClean(page);
+
+  await Promise.all([
+    page.waitForURL(
+      new RegExp(`/${locale}/admin/categories\\?updatedId=`),
+      { timeout: 15_000 },
+    ),
+    submit.click(),
+  ]);
+  await expect(page.getByTestId("updated-category-message")).toBeVisible();
+
+  const row = await readCategoryRow(seeded.id);
+  expect(row?.name.en).toBe(newNameEn);
+});
 
 test("admin edit category — change parent through the picker", async ({
   page,
 }) => {
-  test.setTimeout(60_000);
   const newParent = await seedCategoryInDevTenant({
     slug: uniqueSlug("parent-target"),
   });
@@ -195,74 +200,15 @@ test("admin edit category — change parent through the picker", async ({
   expect(row?.parent_id).toBe(newParent.id);
 });
 
-test("admin edit category — picker excludes self and descendants from parent options", async ({
+test("admin edit category — Cancel after edits surfaces discard-confirm; discard navigates back without saving", async ({
   page,
 }) => {
-  test.setTimeout(60_000);
-  const root = await seedCategoryInDevTenant({ slug: uniqueSlug("excl-root") });
-  const child = await seedCategoryInDevTenant({
-    slug: uniqueSlug("excl-child"),
-    parentId: root.id,
-  });
-  await seedCategoryInDevTenant({
-    slug: uniqueSlug("excl-grand"),
-    parentId: child.id,
-  });
-  // We're editing `root` — its picker must disable root itself AND child
-  // AND grand (the entire subtree).
-
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/${root.id}`);
-
-  await page.getByTestId("category-parent-trigger").click();
-  await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
-
-  // Self row: data-disabled="true", reason="self_or_descendant".
-  const selfRow = page
-    .getByTestId("category-picker-row")
-    .filter({ has: page.locator(`[data-id="${root.id}"]`) });
-  await expect(selfRow).toHaveAttribute("data-disabled", "true");
-  await expect(selfRow).toHaveAttribute(
-    "data-disabled-reason",
-    "self_or_descendant",
-  );
-
-  // Child row: same reason.
-  const childRow = page
-    .getByTestId("category-picker-row")
-    .filter({ has: page.locator(`[data-id="${child.id}"]`) });
-  await expect(childRow).toHaveAttribute("data-disabled", "true");
-  await expect(childRow).toHaveAttribute(
-    "data-disabled-reason",
-    "self_or_descendant",
-  );
-});
-
-test("admin edit category — Cancel with no edits navigates back to list", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  const seeded = await seedCategoryInDevTenant({
-    slug: uniqueSlug("cancel-clean"),
-  });
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/${seeded.id}`);
-  await page.getByTestId("edit-category-cancel").click();
-  await page.waitForURL(/\/en\/admin\/categories(\?|$)/, { timeout: 15_000 });
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    expected.en.listTitle,
-  );
-});
-
-test("admin edit category — Cancel after editing surfaces discard-confirm; discard navigates back", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
   const seeded = await seedCategoryInDevTenant({
     slug: uniqueSlug("cancel-dirty"),
   });
   await signIn(page, "en", OWNER_EMAIL);
   await page.goto(`/en/admin/categories/${seeded.id}`);
+
   await page.locator("#category-name-en").fill(`Dirty-${Date.now()}`);
   await page.getByTestId("edit-category-cancel").click();
   await expect(
@@ -274,104 +220,4 @@ test("admin edit category — Cancel after editing surfaces discard-confirm; dis
   // Name unchanged (discarded).
   const row = await readCategoryRow(seeded.id);
   expect(row?.name.en).toBe(seeded.slug);
-});
-
-test("admin edit category — submitting with stale OCC token shows the stale-write banner; row not destructively overwritten", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  const seeded = await seedCategoryInDevTenant({
-    slug: uniqueSlug("stale"),
-    name: { en: "Pristine", ar: "أصلي" },
-  });
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/${seeded.id}`);
-
-  // Out-of-band bump.
-  await bumpUpdatedAt(seeded.id);
-
-  await page.locator("#category-name-en").fill("ShouldNotApply");
-  await page.getByTestId("edit-category-submit").click();
-  await expect(page.getByTestId("edit-category-stale-write")).toBeVisible();
-
-  const row = await readCategoryRow(seeded.id);
-  expect(row?.name.en).toBe("Pristine");
-});
-
-test("admin edit category — slug change surfaces the change-warning helper", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  const seeded = await seedCategoryInDevTenant({
-    slug: uniqueSlug("slug-warn"),
-  });
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/${seeded.id}`);
-
-  // Edit slug — warning appears.
-  await page.getByTestId("category-slug").fill(`${seeded.slug}-new`);
-  await expect(
-    page.getByTestId("category-slug-change-warning"),
-  ).toBeVisible();
-});
-
-test("admin edit category — beforeunload listener registers when dirty (sanity)", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  const seeded = await seedCategoryInDevTenant({
-    slug: uniqueSlug("unload"),
-  });
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/${seeded.id}`);
-
-  await page.locator("#category-name-en").fill(`Dirty-${Date.now()}`);
-  // Verify the form is in dirty state — submit becomes enabled, which
-  // is the cheap proxy for the dirty memo + listener-registered code
-  // path running at all.
-  await expect(page.getByTestId("edit-category-submit")).toBeEnabled();
-});
-
-// 1a.4.2 follow-up: parent-picker search input must render and filter
-// rows on typing. The locale matrix is covered by the create-category
-// regression test; this asserts the same fix lands on the edit page.
-test("admin edit category — parent-picker search filters rows on typing", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  const target = await seedCategoryInDevTenant({
-    slug: uniqueSlug("ec-search-target"),
-  });
-  const candidate = await seedCategoryInDevTenant({
-    slug: uniqueSlug("ec-search-candidate"),
-    name: { en: "Audio Cables", ar: "كابلات صوتية" },
-  });
-  const decoy = await seedCategoryInDevTenant({
-    slug: uniqueSlug("ec-search-decoy"),
-    name: { en: "Speakers", ar: "مكبرات صوت" },
-  });
-
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/${target.id}`);
-  await page.getByTestId("category-parent-trigger").click();
-  await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
-
-  const search = page.getByTestId("category-picker-search");
-  await expect(search).toBeVisible();
-
-  // axe with picker open (search visible).
-  await expectAxeClean(page);
-
-  const candidateRow = page.locator(
-    `[data-testid="category-picker-row"][data-id="${candidate.id}"]`,
-  );
-  const decoyRow = page.locator(
-    `[data-testid="category-picker-row"][data-id="${decoy.id}"]`,
-  );
-  await expect(candidateRow).toBeVisible();
-  await expect(decoyRow).toBeVisible();
-
-  await search.fill("Audio");
-  await expect(candidateRow).toBeVisible();
-  await expect(decoyRow).toHaveCount(0);
 });

@@ -6,23 +6,12 @@
  * tool, so MCP clients (Claude Desktop, Claude Code) could not introspect
  * parameter shapes and had to guess field names. Every guess failed.
  *
- * Scenarios:
- *   1. `ping` advertises a valid empty-object JSON Schema —
- *      type:"object", properties:{}, additionalProperties:false
- *      (no `required` key on an empty object is spec-compliant).
- *   2. `create_product` advertises a non-empty JSON Schema whose
- *      `properties` reflects the real service-layer schema (slug, name,
- *      status, description?) and whose `required` array
- *      contains at least slug and name, with additionalProperties:false
- *      (because the MCP seam uses `.strict()`).
- *   3. `create_product.properties.name` is itself an object schema with
- *      its own `{en, ar}` shape + `required:["en","ar"]`. This proves
- *      nested objects are not flattened or erased.
- *   4. Anonymous callers never reach the `tools/list` handler (the
- *      route rejects them before handler dispatch); this spec-shape is
- *      only observable to authenticated bearers. Covered by the existing
- *      anonymous-reject test in `mcp-ping.test.ts` case 4; re-verified
- *      here to confirm the schema-exposure change does not regress it.
+ * This is the wire-shape contract for JSON Schema crossing the MCP
+ * transport — kept as a Tier-3 test because the regression mode is
+ * silent (clients break, server doesn't). Scope is intentionally tight:
+ * one empty-schema sample (ping), one non-empty sample (create_product),
+ * one nested-object proof. Anonymous reject is covered by mcp-ping
+ * case 4 — not duplicated here.
  */
 import {
   beforeAll,
@@ -266,13 +255,4 @@ describe("MCP tools/list advertises real JSON Schema per tool", () => {
     expect(nameRequired).toEqual(expect.arrayContaining(["en", "ar"]));
   });
 
-  it("anonymous callers do not reach the tools/list handler — route rejects with 401 before schema exposure", async () => {
-    fakeRedis.clear();
-    const res = await POST(mcpRequest(listToolsEnvelope(4)));
-    expect(res.status).toBe(401);
-    // Body MUST NOT leak tool names or schema fragments.
-    const text = await res.text();
-    expect(text).not.toContain("create_product");
-    expect(text).not.toContain("\"properties\"");
-  });
 });

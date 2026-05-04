@@ -1,13 +1,21 @@
 /**
- * Chunk 1a.4.2 — End-to-end: create-category page.
+ * Admin creates a category — Tier-4 keep per docs/testing.md §3.
  *
- * Covers Block 2 of the master brief AND exercises the shared
- * `<CategoryPickerSheet>` (sliced forward into Block 2 because the
- * parent picker depends on it). Block 4's product-form integration
- * spec is a separate file.
+ * §3 reason: full integration of routing + form + slug auto-derive +
+ * parent picker + post-mutation redirect. Trimmed per the chunk-4 audit:
+ *   - Inner `for (locale of [...])` loops dropped — projects pin a locale.
+ *   - Per-feature touch-target asserts removed (§4.2).
+ *   - Slug-shape inline error (Bad Slug!) deleted — Zod-shape validation
+ *     covered at Tier 2 in
+ *     tests/unit/services/categories/create-category.test.ts.
+ *   - Slug-collision deleted — Tier-2 covered (slug_taken case in
+ *     create-category.test.ts).
+ *   - Picker Cancel-no-op + Escape + backdrop deleted — these are dialog
+ *     mechanics not category-specific behavior; §3 explicitly excludes
+ *     "validation paths that have a Tier-2 equivalent" and dialog UX is
+ *     not on the keep list.
  *
- * Coverage-lint substring contract: `categories.create` must appear
- * in this file (categories.create).
+ * Coverage-lint substring contract: `categories.create` (categories.create).
  */
 import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
@@ -25,7 +33,6 @@ const expected = {
   en: {
     title: "New category",
     submit: "Create category",
-    listTitle: "Categories",
     nameEnLabel: "Name (English)",
     nameArLabel: "Name (Arabic)",
     signInSubmit: "Sign in",
@@ -35,7 +42,6 @@ const expected = {
   ar: {
     title: "فئة جديدة",
     submit: "إنشاء الفئة",
-    listTitle: "الفئات",
     nameEnLabel: "الاسم (بالإنجليزية)",
     nameArLabel: "الاسم (بالعربية)",
     signInSubmit: "تسجيل الدخول",
@@ -44,9 +50,17 @@ const expected = {
   },
 } as const;
 
+type Locale = keyof typeof expected;
+
+function projectLocale(testInfo: {
+  project: { metadata?: { locale?: string } };
+}): Locale {
+  return testInfo.project.metadata?.locale === "ar" ? "ar" : "en";
+}
+
 async function signIn(
   page: Page,
-  locale: "en" | "ar",
+  locale: Locale,
   email: string,
 ): Promise<void> {
   await page.goto(`/${locale}/signin`);
@@ -96,93 +110,52 @@ function uniqueSlug(tag: string): string {
   return `e2e-cc-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 }
 
-for (const locale of ["en", "ar"] as const) {
-  test(`admin create category — root happy path, ${locale}`, async ({
-    page,
-  }) => {
-    test.setTimeout(60_000);
-    await signIn(page, locale, OWNER_EMAIL);
-    await page.goto(`/${locale}/admin/categories/new`);
-
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      expected[locale].title,
-    );
-
-    const slugInput = page.getByTestId("category-slug");
-    const submit = page.getByTestId("create-category-submit");
-
-    // Tap targets ≥ 44px on the primary CTA.
-    const submitBox = await submit.boundingBox();
-    expect(submitBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-
-    // Auto-derive: typing in the English name flows into the slug.
-    const tag = `Root-${Date.now()}`;
-    await page.locator("#category-name-en").fill(tag);
-    await expect(slugInput).toHaveValue(/^root-\d+/i);
-
-    // Edit the slug → slugDirty fires → typing in name no longer overwrites.
-    await slugInput.fill("dirty-slug");
-    await page.locator("#category-name-en").fill(`${tag}-Plus`);
-    await expect(slugInput).toHaveValue("dirty-slug");
-
-    // Sync button reverts dirty + re-derives from name.
-    await page.getByTestId("category-slug-sync").click();
-    await expect(slugInput).toHaveValue(/^root-\d+-plus/i);
-
-    // Provide a fresh unique slug (so we don't collide with prior runs).
-    const finalSlug = uniqueSlug(`root-${locale}`);
-    await slugInput.fill(finalSlug);
-    await page.locator("#category-name-ar").fill("جذر");
-
-    // axe with picker closed.
-    await expectAxeClean(page);
-
-    await submit.click();
-    await page.waitForURL(
-      new RegExp(`/${locale}/admin/categories\\?createdId=`),
-      { timeout: 15_000 },
-    );
-    await expect(page.getByTestId("created-category-message")).toBeVisible();
-  });
-}
-
-test("admin create category — slug shape errors render inline (live)", async ({
+test("admin create category — root happy path: auto-derive slug, sync, submit", async ({
   page,
-}) => {
-  test.setTimeout(60_000);
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/new`);
+}, testInfo) => {
+  const locale = projectLocale(testInfo);
+  await signIn(page, locale, OWNER_EMAIL);
+  await page.goto(`/${locale}/admin/categories/new`);
 
-  // Manually type a bad slug.
-  await page.getByTestId("category-slug").fill("Bad Slug!");
-  await expect(page.locator("#category-slug-error")).toBeVisible();
-});
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    expected[locale].title,
+  );
 
-test("admin create category — slug-taken collision surfaces inline error", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  // Seed a category whose slug we'll collide with.
-  const dup = uniqueSlug("dup");
-  await seedCategoryInDevTenant({ slug: dup });
+  const slugInput = page.getByTestId("category-slug");
+  const submit = page.getByTestId("create-category-submit");
 
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/new`);
+  // Auto-derive: typing in the English name flows into the slug.
+  const tag = `Root-${Date.now()}`;
+  await page.locator("#category-name-en").fill(tag);
+  await expect(slugInput).toHaveValue(/^root-\d+/i);
 
-  await page.locator("#category-name-en").fill("Collide");
-  await page.locator("#category-name-ar").fill("تصادم");
-  await page.getByTestId("category-slug").fill(dup);
-  await page.getByTestId("create-category-submit").click();
+  // Edit slug → slugDirty fires → typing in name no longer overwrites.
+  await slugInput.fill("dirty-slug");
+  await page.locator("#category-name-en").fill(`${tag}-Plus`);
+  await expect(slugInput).toHaveValue("dirty-slug");
 
-  // The form stays on the page with an inline slug error.
-  await expect(page.locator("#category-slug-error")).toBeVisible();
-  await expect(page).toHaveURL(/\/en\/admin\/categories\/new$/);
+  // Sync button reverts dirty + re-derives from name.
+  await page.getByTestId("category-slug-sync").click();
+  await expect(slugInput).toHaveValue(/^root-\d+-plus/i);
+
+  // Provide a fresh unique slug (so we don't collide with prior runs).
+  const finalSlug = uniqueSlug(`root-${locale}`);
+  await slugInput.fill(finalSlug);
+  await page.locator("#category-name-ar").fill("جذر");
+
+  await submit.click();
+  await page.waitForURL(
+    new RegExp(`/${locale}/admin/categories\\?createdId=`),
+    { timeout: 15_000 },
+  );
+  await expect(page.getByTestId("created-category-message")).toBeVisible();
 });
 
 test("admin create category — child happy path uses parent picker; depth-3 row is disabled", async ({
   page,
 }) => {
-  test.setTimeout(60_000);
+  // Single-project — wire-shape coverage, locale-independent.
+  // (axe scan on this surface is covered by the parent-picker-search test.)
   // Seed a 3-level chain so the picker has a depth-3 row to disable.
   const root = await seedCategoryInDevTenant({ slug: uniqueSlug("p-root") });
   const child = await seedCategoryInDevTenant({
@@ -205,9 +178,6 @@ test("admin create category — child happy path uses parent picker; depth-3 row
   // Open picker.
   await page.getByTestId("category-parent-trigger").click();
   await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
-
-  // axe with picker open.
-  await expectAxeClean(page);
 
   // Depth-3 row is disabled with the depth_cap reason.
   const grandRow = page
@@ -245,156 +215,69 @@ test("admin create category — child happy path uses parent picker; depth-3 row
   }
 });
 
-test("admin create category — picker Cancel is a true no-op", async ({
+// Regression test for `searchable={false}` having been wired in by mistake.
+// The picker filters rows by the active locale's name (or the Latin slug),
+// so each project asserts using its own localized query.
+test("admin create category — parent-picker search filters by name and slug", async ({
   page,
-}) => {
-  test.setTimeout(60_000);
-  const root = await seedCategoryInDevTenant({ slug: uniqueSlug("cancel-root") });
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/new`);
-
-  // Initial display is the i18n placeholder for "no parent selected".
-  const display = page.getByTestId("category-parent-display");
-  await expect(display).toHaveText("No parent");
-
-  // Open picker, click a row, then Cancel — display unchanged.
-  await page.getByTestId("category-parent-trigger").click();
-  await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
-  const rootRow = page
-    .getByTestId("category-picker-row")
-    .filter({ has: page.locator(`[data-id="${root.id}"]`) });
-  await rootRow.locator('[data-testid="category-picker-radio"]').check();
-  await page.getByTestId("category-picker-cancel").click();
-  await expect(page.getByTestId("category-picker-sheet")).toHaveCount(0);
-  await expect(display).toHaveText("No parent");
-});
-
-test("admin create category — Escape closes picker; backdrop closes picker", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  await signIn(page, "en", OWNER_EMAIL);
-  await page.goto(`/en/admin/categories/new`);
-
-  // Escape.
-  await page.getByTestId("category-parent-trigger").click();
-  await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("category-picker-sheet")).toHaveCount(0);
-
-  // Backdrop click. The backdrop is an absolutely-positioned button
-  // sitting under the centered sheet section — clicking the geometric
-  // center of the backdrop hits the section instead. Click the
-  // top-left corner where the section doesn't reach. force:true
-  // dispatches without re-targeting.
-  await page.getByTestId("category-parent-trigger").click();
-  await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
-  await page
-    .getByTestId("category-picker-backdrop")
-    .click({ force: true, position: { x: 5, y: 5 } });
-  await expect(page.getByTestId("category-picker-sheet")).toHaveCount(0);
-});
-
-// 1a.4.2 follow-up: the parent picker on the create-category page must
-// expose its search input and typing into it must filter rows. Both
-// localized name and slug are matched (case-insensitive). Regression
-// test for `searchable={false}` having been wired in by mistake.
-for (const locale of ["en", "ar"] as const) {
-  test(`admin create category — parent-picker search filters rows on typing, ${locale}`, async ({
-    page,
-  }) => {
-    test.setTimeout(60_000);
-
-    // Two distinct seeds: localized names per locale, plus a Latin slug
-    // we can match independently. The third (a "decoy") must NOT appear
-    // when we filter for one of the others.
-    const tagPens = locale === "en" ? "Pens" : "أقلام";
-    const tagBooks = locale === "en" ? "Notebooks" : "دفاتر";
-    const tagDecoy = locale === "en" ? "Erasers" : "محايات";
-    const slugPens = uniqueSlug("search-pens");
-    const slugBooks = uniqueSlug("search-books");
-    const slugDecoy = uniqueSlug("search-decoy");
-    const pens = await seedCategoryInDevTenant({
-      slug: slugPens,
-      name: { en: "Pens", ar: "أقلام" },
-    });
-    const books = await seedCategoryInDevTenant({
-      slug: slugBooks,
-      name: { en: "Notebooks", ar: "دفاتر" },
-    });
-    const decoy = await seedCategoryInDevTenant({
-      slug: slugDecoy,
-      name: { en: "Erasers", ar: "محايات" },
-    });
-
-    await signIn(page, locale, OWNER_EMAIL);
-    await page.goto(`/${locale}/admin/categories/new`);
-    await page.getByTestId("category-parent-trigger").click();
-    await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
-
-    // The search input must be rendered.
-    const search = page.getByTestId("category-picker-search");
-    await expect(search).toBeVisible();
-
-    // axe with picker open and search visible.
-    await expectAxeClean(page);
-
-    // All three seeded rows present before any filtering.
-    const pensRow = page.locator(
-      `[data-testid="category-picker-row"][data-id="${pens.id}"]`,
-    );
-    const booksRow = page.locator(
-      `[data-testid="category-picker-row"][data-id="${books.id}"]`,
-    );
-    const decoyRow = page.locator(
-      `[data-testid="category-picker-row"][data-id="${decoy.id}"]`,
-    );
-    await expect(pensRow).toBeVisible();
-    await expect(booksRow).toBeVisible();
-    await expect(decoyRow).toBeVisible();
-
-    // Filter by localized name — only the matching row stays visible.
-    await search.fill(tagPens);
-    await expect(pensRow).toBeVisible();
-    await expect(booksRow).toHaveCount(0);
-    await expect(decoyRow).toHaveCount(0);
-
-    // Switch the query — different match, again only the matching row.
-    await search.fill(tagBooks);
-    await expect(booksRow).toBeVisible();
-    await expect(pensRow).toHaveCount(0);
-    await expect(decoyRow).toHaveCount(0);
-
-    // Slug match works too — a Latin substring of the books slug must
-    // surface that row regardless of locale.
-    await search.fill(slugBooks);
-    await expect(booksRow).toBeVisible();
-    await expect(pensRow).toHaveCount(0);
-    await expect(decoyRow).toHaveCount(0);
-
-    // Garbage query — no rows; the no-results message renders instead.
-    await search.fill("zzz-no-such-category-zzz");
-    await expect(
-      page.getByTestId("category-picker-no-results"),
-    ).toBeVisible();
-
-    // Clearing the search restores all rows.
-    await search.fill("");
-    await expect(pensRow).toBeVisible();
-    await expect(booksRow).toBeVisible();
-    await expect(decoyRow).toBeVisible();
-
-    // Picking a row after a filter still works end-to-end (Apply commits
-    // the visible row's id to the parent display).
-    await search.fill(tagDecoy);
-    await expect(decoyRow).toBeVisible();
-    await decoyRow.locator('[data-testid="category-picker-radio"]').check();
-    await page.getByTestId("category-picker-apply").click();
-    await expect(page.getByTestId("category-picker-sheet")).toHaveCount(0);
-    const decoyDisplayName = locale === "en" ? "Erasers" : "محايات";
-    await expect(
-      page.getByTestId("category-parent-display"),
-    ).toContainText(decoyDisplayName);
+}, testInfo) => {
+  const locale = projectLocale(testInfo);
+  // Three seeds with both-locale names + Latin slugs. The decoy must NOT
+  // appear when we filter for one of the others.
+  const slugPens = uniqueSlug("search-pens");
+  const slugBooks = uniqueSlug("search-books");
+  const slugDecoy = uniqueSlug("search-decoy");
+  const pens = await seedCategoryInDevTenant({
+    slug: slugPens,
+    name: { en: "Pens", ar: "أقلام" },
   });
-}
+  const books = await seedCategoryInDevTenant({
+    slug: slugBooks,
+    name: { en: "Notebooks", ar: "دفاتر" },
+  });
+  const decoy = await seedCategoryInDevTenant({
+    slug: slugDecoy,
+    name: { en: "Erasers", ar: "محايات" },
+  });
+  // Locale-appropriate query for "books"-equivalent.
+  const booksQuery = locale === "ar" ? "دفاتر" : "Notebooks";
 
+  await signIn(page, locale, OWNER_EMAIL);
+  await page.goto(`/${locale}/admin/categories/new`);
+  await page.getByTestId("category-parent-trigger").click();
+  await expect(page.getByTestId("category-picker-sheet")).toBeVisible();
+
+  // The search input must be rendered.
+  const search = page.getByTestId("category-picker-search");
+  await expect(search).toBeVisible();
+
+  // Single axe scan for the picker-sheet surface (§4.2 — once per
+  // distinct visual surface across the suite).
+  await expectAxeClean(page);
+
+  const pensRow = page.locator(
+    `[data-testid="category-picker-row"][data-id="${pens.id}"]`,
+  );
+  const booksRow = page.locator(
+    `[data-testid="category-picker-row"][data-id="${books.id}"]`,
+  );
+  const decoyRow = page.locator(
+    `[data-testid="category-picker-row"][data-id="${decoy.id}"]`,
+  );
+
+  // Filter by localized name → only that row stays.
+  await search.fill(booksQuery);
+  await expect(booksRow).toBeVisible();
+  await expect(pensRow).toHaveCount(0);
+  await expect(decoyRow).toHaveCount(0);
+
+  // Latin slug substring works regardless of locale.
+  await search.fill(slugDecoy);
+  await expect(decoyRow).toBeVisible();
+  await expect(pensRow).toHaveCount(0);
+  await expect(booksRow).toHaveCount(0);
+
+  // Garbage query → no results message renders.
+  await search.fill("zzz-no-such-category-zzz");
+  await expect(page.getByTestId("category-picker-no-results")).toBeVisible();
+});

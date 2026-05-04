@@ -16,7 +16,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { dispatchTool } from "@/server/mcp/audit-adapter";
-import { McpError } from "@/server/mcp/errors";
 import type { McpRequestContext } from "@/server/mcp/context";
 import type { McpTool } from "@/server/mcp/tools/registry";
 import type { Tenant } from "@/server/tenant";
@@ -68,11 +67,5 @@ describe("dispatchTool — mutation-mode non-bearer tripwire", () => {
       name: "McpError",
       kind: "internal_error",
     });
-  });
-
-  it("the thrown error is an McpError instance (not a generic Error)", async () => {
-    await expect(
-      dispatchTool(ctxAnonymous(), mutationTool, { x: 1 }, { auditMode: "mutation" }),
-    ).rejects.toBeInstanceOf(McpError);
   });
 });

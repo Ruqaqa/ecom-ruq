@@ -1,7 +1,10 @@
 /**
- * `list_products` MCP tool — unit tests for tool shape in isolation.
- * Integration with the real HTTP route + DB lands in
- * tests/integration/mcp/list-products.test.ts.
+ * `list_products` MCP tool — unit tests for tool shape in isolation
+ * (visibility, authorize, schema strictness, output shape).
+ *
+ * Per docs/testing.md §3, per-tool MCP rules are tested at Tier 2.
+ * The MCP transport itself (route handler, JSON-RPC envelope, cross-
+ * tenant denial) is exercised once at Tier 3 by mcp-ping.test.ts.
  */
 import { describe, it, expect } from "vitest";
 import { randomUUID } from "node:crypto";

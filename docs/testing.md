@@ -21,17 +21,15 @@ Tier 1 + Tier 2 are where most testing happens. Tier 4 is **deliberately small a
 
 ## 2. The bar for a Tier-4 (browser) test
 
-> "If we could only have **twenty** browser tests in this repo, would this one be in the top twenty?"
-
-If the answer is no, the behavior belongs in Tier 2. Apply this question every time the TDD agent considers writing a Playwright spec.
-
-A behavior earns a browser test when **all** of these are true:
+The bar is the **three conditions below**, not a fixed number. A behavior earns a browser test when **all** are true:
 
 1. A real human (operator or customer) triggers it by clicking, typing, or submitting.
 2. The bug it catches is one that Tier 2 cannot meaningfully express — typically an integration of: routing + form serialization + client-side validation + server response handling + post-mutation refetch + visible state.
 3. It's on the critical path for revenue, security, or trust.
 
 If two of those three are present, it's a judgement call — prefer Tier 2.
+
+Phase-1 sanity check: "if we could only have **twenty** browser tests in this repo today, would this one be in the top twenty?" The cap scales with the site as new critical surfaces ship — the bar stays constant.
 
 ---
 
@@ -79,7 +77,7 @@ The shipped test estate should converge on roughly these — not every page, eve
 **Adversarial smoke (one good test, not many):**
 - Cross-tenant denial: anonymous, customer, and tenant-A user cannot reach tenant-B admin pages — one parametrised spec.
 
-**That's roughly 15–20 browser specs.** Anything beyond that needs the §2 bar.
+**That's roughly 15–20 browser specs for Phase 1.** Future phases (storefront, checkout, payments, customer account, post-purchase) each bring their own critical journeys and the count grows with them. The §2 bar — not the number — is what gates new specs.
 
 ### What does NOT get a Tier-4 test
 

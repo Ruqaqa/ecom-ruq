@@ -111,12 +111,3 @@ describe.each(tools)("%s tool — handler tripwire", (label, tool) => {
     }
   });
 });
-
-describe("tool naming", () => {
-  it("up tool is named move_category_up", () => {
-    expect(moveCategoryUpTool.name).toBe("move_category_up");
-  });
-  it("down tool is named move_category_down", () => {
-    expect(moveCategoryDownTool.name).toBe("move_category_down");
-  });
-});

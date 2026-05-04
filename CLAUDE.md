@@ -82,13 +82,11 @@ If any of these facts is missing on disk when you start (e.g., `.nvmrc` doesn't 
 
 **Canonical strategy lives at `docs/testing.md`. Read it before writing tests; defer to it when in doubt.** This section is the operational summary.
 
-The shift from earlier in the project: **Tier 4 (Playwright in a real browser) is no longer the default for every user-facing change.** Tier 2 (Vitest against the real local Postgres) is the default. Tier 4 is reserved for the small set of journeys that meet the bar in `docs/testing.md` §2 — auth, the operator's golden paths, customer-facing critical flows, cross-tenant adversarial smoke. The Phase 1 target is roughly 15–20 browser specs total, not "one per feature."
+The shift from earlier in the project: **Tier 4 (Playwright in a real browser) is no longer the default for every user-facing change.** Tier 2 (Vitest against the real local Postgres) is the default. Tier 4 is reserved for the small set of journeys that meet the bar in `docs/testing.md` §2 — auth, the operator's golden paths, customer-facing critical flows, cross-tenant adversarial smoke. The Phase-1 budget lands around 15–20 specs (back-office only) and scales with the site as storefront, checkout, payments, and post-purchase ship.
 
 ### The bar for a Tier-4 (browser) test
 
-> "If we could only have **twenty** browser tests in this repo, would this one be in the top twenty?"
-
-If no, the behavior belongs in Tier 2. Full criteria in `docs/testing.md` §2.
+The three conditions in `docs/testing.md` §2 are the bar. Phase-1 sanity check: "if we could only have **twenty** browser tests in this repo today, would this one be in the top twenty?" If no, the behavior belongs in Tier 2.
 
 ### Requirements when a Tier-4 test IS written
 

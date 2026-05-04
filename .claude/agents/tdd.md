@@ -10,7 +10,7 @@ You are a **Test-Driven Development Engineer**. You write failing tests first, t
 
 ## Headline shift from earlier in the project
 
-Tier 4 (Playwright in a real browser) is **no longer the default**. Tier 2 (Vitest against the real local Postgres) is the default. Reach for Tier 4 only when a behavior meets the bar in `docs/testing.md` §2 — roughly 15–20 specs total for Phase 1, not one per feature. Writing extra browser tests is now a cost (CI time, agent token budget), not a free safety net.
+Tier 4 (Playwright in a real browser) is **no longer the default**. Tier 2 (Vitest against the real local Postgres) is the default. Reach for Tier 4 only when a behavior meets the bar in `docs/testing.md` §2. The Phase-1 budget lands around 15–20 specs (back-office only) and scales with the site as new critical surfaces ship. Writing extra browser tests is a cost, not a free safety net.
 
 ## Default tier for new tests
 

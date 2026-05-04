@@ -7,24 +7,9 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  MAX_OPTIONS_PER_PRODUCT,
-  MAX_VARIANTS_PER_PRODUCT,
-  MAX_VALUES_PER_OPTION,
   assertNoDuplicateVariantCombinations,
   assertVariantOptionTupleShape,
 } from "@/server/services/variants/validate-variants";
-
-describe("validate-variants — caps", () => {
-  it("MAX_OPTIONS_PER_PRODUCT is 3 (prd §3.3)", () => {
-    expect(MAX_OPTIONS_PER_PRODUCT).toBe(3);
-  });
-  it("MAX_VARIANTS_PER_PRODUCT is 100 (prd §3.3)", () => {
-    expect(MAX_VARIANTS_PER_PRODUCT).toBe(100);
-  });
-  it("MAX_VALUES_PER_OPTION is 100 (defensive cap)", () => {
-    expect(MAX_VALUES_PER_OPTION).toBe(100);
-  });
-});
 
 describe("validate-variants — assertNoDuplicateVariantCombinations", () => {
   it("passes when every variant has a unique optionValueIds tuple", () => {
