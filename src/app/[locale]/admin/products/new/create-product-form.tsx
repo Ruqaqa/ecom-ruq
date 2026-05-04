@@ -87,7 +87,12 @@ export function CreateProductForm({ locale }: Props) {
 
   const mutation = trpc.products.create.useMutation({
     onSuccess: (data) => {
-      router.push(`/${locale}/admin/products?createdId=${data.id}`);
+      // Land on the edit page directly. The owner's natural next action
+      // after creating a product is filling in variants, options,
+      // categories, and photos — all of which live on the edit page.
+      // Routing back to the list with a flash banner forced them to
+      // re-find the row they just created.
+      router.push(`/${locale}/admin/products/${data.id}`);
     },
     onError: (err) => {
       setFieldErrors({});

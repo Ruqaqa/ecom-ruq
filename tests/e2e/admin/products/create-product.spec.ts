@@ -32,6 +32,7 @@ const expected = {
     submit: "Create product",
     emailLabel: "Email",
     passwordLabel: "Password",
+    editFormTitle: "Edit product",
   },
   ar: {
     signInTitle: "تسجيل الدخول",
@@ -40,6 +41,7 @@ const expected = {
     submit: "إنشاء المنتج",
     emailLabel: "البريد الإلكتروني",
     passwordLabel: "كلمة المرور",
+    editFormTitle: "تعديل المنتج",
   },
 } as const;
 
@@ -98,11 +100,18 @@ test("admin creates a product — happy path", async ({ page }, testInfo) => {
   await page.locator("#product-name-ar").fill("سوني");
   await submit.click();
 
+  // Owner UX: post-create lands directly on the new product's edit page,
+  // not back on the list with a flash banner. The edit page is where the
+  // operator's natural next action lives (variants, options, categories,
+  // photos), so we save them a click and avoid the "find the row I just
+  // created" friction.
   await page.waitForURL(
-    new RegExp(`/${locale}/admin/products\\?createdId=[^&]+`),
+    new RegExp(`/${locale}/admin/products/[0-9a-f-]{36}(?:[?#]|$)`),
     { timeout: 15_000 },
   );
-  await expect(page.getByTestId("created-product-message")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    expected[locale].editFormTitle,
+  );
 
   const rows = await readProductsForTenant("localhost:5001", slug);
   expect(rows.length).toBe(1);

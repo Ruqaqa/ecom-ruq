@@ -71,7 +71,6 @@
       },
       "list": {
         "title": "Products",
-        "createdMessage": "Created: {id}",
         "updatedMessage": "Saved: {name}",
         "createCta": "Create product",
         "empty": {

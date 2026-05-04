@@ -40,6 +40,7 @@ import type { Tx } from "@/server/db";
 import { dispatchTool, type ToolAuditConfig } from "../audit-adapter";
 import { pingTool } from "./ping";
 import { createProductTool } from "./create-product";
+import { createProductRichTool } from "./create-product-rich";
 import { updateProductTool } from "./update-product";
 import { deleteProductTool } from "./delete-product";
 import { restoreProductTool } from "./restore-product";
@@ -94,6 +95,15 @@ export const ALL_TOOLS: ReadonlyArray<RegisteredTool> = [
   { tool: pingTool as McpTool<unknown, unknown>, audit: { auditMode: "none" } },
   {
     tool: createProductTool as McpTool<unknown, unknown>,
+    audit: { auditMode: "mutation" },
+  },
+  // Composed all-or-nothing creation: one call lays down the product,
+  // its options, its variants, and its category links inside one
+  // transaction. The dispatcher catches the dry-run rollback sentinel
+  // and writes a `mcp.create_product_rich.dry_run` audit row in a
+  // follow-up tx — see audit-adapter.ts.
+  {
+    tool: createProductRichTool as McpTool<unknown, unknown>,
     audit: { auditMode: "mutation" },
   },
   // 1a.2 — `update_product` mutation tool. auditMode:"mutation".

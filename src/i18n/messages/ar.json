@@ -71,7 +71,6 @@
       },
       "list": {
         "title": "المنتجات",
-        "createdMessage": "تم الإنشاء: {id}",
         "updatedMessage": "تم الحفظ: {name}",
         "createCta": "إنشاء منتج",
         "empty": {

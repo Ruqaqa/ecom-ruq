@@ -4,6 +4,16 @@ Reversed and deferred decisions, with the reasoning. Read this before re-litigat
 
 ---
 
+## 2026-05-04 — Composed product creation: local refs over UUID round-trips
+
+`create_product_rich` lets an agent create a product, its options and values, its variants, and its category attachments in one all-or-nothing MCP call. The composed input uses agent-supplied local "refs" (short human-readable tags scoped to the single call) so a variant can reference an option value the same call is creating, without having to learn UUIDs first. Refs never persist; the response carries a `refMap` that correlates each ref back to the server-minted UUID for any follow-up call. Locally, this means an autonomous agent can lay down a full SKU matrix in one step instead of a four-call dance with intermediate UUID lookups.
+
+**Why local refs, not UUIDs.** UUIDs would force the agent to round-trip — call options-create, parse the UUIDs out of the response, weave them into a variants-create body. That fights the whole point of a single composed call. Local refs cost a small input-shape refinement at the boundary; the underlying primitives keep their UUID-only invariants unchanged.
+
+**Why a new tool, not extending `create_product`.** Extending the simple shape would bloat every existing caller's tool schema in `tools/list` and confuse the audit operation. The simple call stays simple; the composed call is one more entry in the registry.
+
+**Why one parent audit row, not parent + four children.** The composed call is one logical operation — splitting it into four rows would double chain growth and force investigators to correlate four rows to reconstruct one intent. The bounded snapshot helpers already strip localized text, so the composite payload stays well under the 64KB row cap.
+
 ## 2026-05-04 — Testing strategy reversed: Tier 4 no longer the default; suite resized
 
 Browser specs cut from 30 to 11 (with room to grow as storefront/checkout/payments ship). Mid-tier tests cut from 7 to 4. Low-value fast tests pruned. Image processing pipeline refactored to decode-once-encode-many to eliminate worker-contention flake under the new consolidated photo journey.

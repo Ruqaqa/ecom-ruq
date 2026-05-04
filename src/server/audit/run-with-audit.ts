@@ -68,6 +68,17 @@ export interface RunWithAuditArgs<T> {
    */
   onFailure(err: unknown): { errorCode: AuditErrorCode; failureInput: unknown };
   /**
+   * Optional predicate. When provided AND it returns true for the
+   * thrown error, `runWithAudit` SUPPRESSES the failure-audit write
+   * and re-throws as usual. The caller is responsible for writing
+   * whatever audit row makes sense in its own follow-up tx.
+   *
+   * Use case: composed services that intentionally throw a sentinel
+   * to roll back the tx (the rich-create dry-run path) — the failure
+   * row would be misleading because no real failure occurred.
+   */
+  isExpectedRollback?: (err: unknown) => boolean;
+  /**
    * The caller's unit of work. Runs inside the opened tx. Must return
    * the value the outer caller will receive PLUS the `after` payload
    * the success audit row should record (often the same — the parsed
@@ -103,6 +114,12 @@ export async function runWithAudit<T>(args: RunWithAuditArgs<T>): Promise<T> {
       return result;
     });
   } catch (err) {
+    if (args.isExpectedRollback?.(err) === true) {
+      // Caller-flagged "expected rollback" — suppress the failure-audit
+      // write. The caller (e.g. MCP rich-create dry-run) writes its own
+      // bespoke audit row in its own tx after this re-throws.
+      throw err;
+    }
     const { errorCode, failureInput } = args.onFailure(err);
     await writeAuditInOwnTx({
       tenantId: args.tenantId,

@@ -36,6 +36,8 @@ import { runWithAudit } from "@/server/audit/run-with-audit";
 import { writeAuditInOwnTx } from "@/server/audit/write";
 import { bumpLastUsedAt, shouldWriteLastUsedAt } from "@/server/auth/last-used-debounce";
 import { McpError, auditErrorCodeToMcpKind } from "./errors";
+import { isRichCreateDryRunRollback } from "./tools/create-product-rich";
+import { DryRunRollback } from "@/server/services/products/create-product-rich";
 
 /**
  * Decision 1 (7.4): `forbidden` refusals are always audited, regardless
@@ -168,37 +170,68 @@ export async function dispatchTool<TIn, TOut>(
           role: ctx.identity.role,
         },
       );
-      result = await runWithAudit<TOut>({
-        db: appDb,
-        authedCtx,
-        tenantId: ctx.tenant.id,
-        operation,
-        actor,
-        correlationId: ctx.correlationId,
-        successInput: parsedInput,
-        onFailure: (err) => ({
-          errorCode: mapErrorToAuditCode(err),
-          failureInput: inputForFailure(err),
-        }),
-        work: async (tx) => {
-          const handlerResult = await tool.handler(ctx, parsedInput, tx);
-          const parsedOutput = tool.outputSchema.parse(handlerResult);
-          // Tool may have populated ctx.auditOverride to record a
-          // different audit shape than the wire return — see
-          // McpAuditOverride.
-          const after =
-            ctx.auditOverride.after !== undefined
-              ? ctx.auditOverride.after
-              : parsedOutput;
-          return {
-            result: parsedOutput,
-            after,
-            ...(ctx.auditOverride.before !== undefined
-              ? { before: ctx.auditOverride.before }
-              : {}),
-          };
-        },
-      });
+      try {
+        result = await runWithAudit<TOut>({
+          db: appDb,
+          authedCtx,
+          tenantId: ctx.tenant.id,
+          operation,
+          actor,
+          correlationId: ctx.correlationId,
+          successInput: parsedInput,
+          onFailure: (err) => ({
+            errorCode: mapErrorToAuditCode(err),
+            failureInput: inputForFailure(err),
+          }),
+          // The rich-create dry-run path throws a sentinel from inside
+          // the tx so the tx rolls back — this flag tells runWithAudit
+          // to suppress the misleading failure-audit row. The catch
+          // below writes a bespoke `.dry_run` success row in its own
+          // tx and returns the cached preview to the wire.
+          isExpectedRollback: isRichCreateDryRunRollback,
+          work: async (tx) => {
+            const handlerResult = await tool.handler(ctx, parsedInput, tx);
+            const parsedOutput = tool.outputSchema.parse(handlerResult);
+            // Tool may have populated ctx.auditOverride to record a
+            // different audit shape than the wire return — see
+            // McpAuditOverride.
+            const after =
+              ctx.auditOverride.after !== undefined
+                ? ctx.auditOverride.after
+                : parsedOutput;
+            return {
+              result: parsedOutput,
+              after,
+              ...(ctx.auditOverride.before !== undefined
+                ? { before: ctx.auditOverride.before }
+                : {}),
+            };
+          },
+        });
+      } catch (err) {
+        if (err instanceof DryRunRollback) {
+          // Architect's spec: write `<operation>.dry_run` success row in
+          // its own follow-up tx after rollback. Wire-side, this is a
+          // success — return the preview (which already carries the
+          // server-minted UUIDs assembled inside the rolled-back tx).
+          // See module docstring for the failure-mode race.
+          const dryRunOperation = `${operation}.dry_run`;
+          await writeAuditInOwnTx({
+            tenantId: ctx.tenant.id,
+            operation: dryRunOperation,
+            actorType: actor.actorType,
+            actorId: actor.actorId,
+            tokenId: actor.tokenId,
+            outcome: "success",
+            correlationId: ctx.correlationId,
+            input: parsedInput,
+            after: err.preview.auditAfter,
+          });
+          result = err.preview as unknown as TOut;
+        } else {
+          throw err;
+        }
+      }
     } else {
       const handlerResult = await tool.handler(ctx, parsedInput, null);
       result = tool.outputSchema.parse(handlerResult);

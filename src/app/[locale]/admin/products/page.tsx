@@ -44,7 +44,6 @@ export default async function AdminProductsListPage({
 }: {
   params: Promise<{ locale: string }>;
   searchParams: Promise<{
-    createdId?: string | string[];
     updatedId?: string | string[];
     removedId?: string | string[];
     restoredId?: string | string[];
@@ -59,8 +58,6 @@ export default async function AdminProductsListPage({
   const format = await getFormatter();
   const locale: "en" | "ar" = rawLocale === "ar" ? "ar" : "en";
 
-  const rawCreated = sp.createdId;
-  const createdId = Array.isArray(rawCreated) ? rawCreated[0] : rawCreated;
   const rawUpdated = sp.updatedId;
   const updatedId = Array.isArray(rawUpdated) ? rawUpdated[0] : rawUpdated;
   const rawRemoved = sp.removedId;
@@ -166,16 +163,6 @@ export default async function AdminProductsListPage({
             </Link>
           </div>
         </header>
-
-        {createdId ? (
-          <p
-            role="status"
-            data-testid="created-product-message"
-            className="mt-6 rounded-md bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950 dark:text-green-300"
-          >
-            {t("createdMessage", { id: createdId })}
-          </p>
-        ) : null}
 
         {updatedId ? (
           <p
